@@ -1,0 +1,44 @@
+name: api-only
+version: 1.0.0
+description: API Bundle（7 个子 Skill，适合后端 / API 开发者）
+author: project-orchestrator authors
+license: MIT
+skills:
+  # Phase 1: API 项目初始化
+  - name: spec-bootstrap
+    required: true
+    role: 项目初始化规范生成（Spec + Plan + Tasks）
+  - name: code-patterns
+    required: true
+    role: 后端代码规范注入（TypeScript / Node.js 模式）
+  - name: scaffold-runner
+    required: true
+    role: 后端脚手架生成（express-api / nestjs-api / koa-api / spring-boot / fastapi / go-api / rust-api / django-api / dotnet-api）
+  - name: api-contract
+    required: true
+    role: OpenAPI 3.1.2 契约生成与校验（RFC 9457 Problem + Bearer JWT）
+
+  # Phase 2: API 变更与实现
+  - name: openspec-workflow
+    required: true
+    role: 提案驱动变更管理（PROPOSAL → SPEC delta → TASKS → ARCHIVE）
+  - name: implement-executor
+    required: false
+    role: Phase 驱动 LLM Agent 代码生成
+  - name: test-runner
+    required: true
+    role: API 自动化测试 + 契约测试 + 覆盖率门禁
+entry-points:
+  - bootstrap
+  - scaffold
+  - contract
+  - change
+  - implement
+  - test
+tags:
+  - backend
+  - api-design
+  - openapi
+  - contract-first
+  - api-testing
+  - spec-driven-development

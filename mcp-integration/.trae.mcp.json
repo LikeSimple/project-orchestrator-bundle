@@ -1,0 +1,78 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}"
+      ],
+      "env": {
+        "START_MCP_TIMEOUT_MS": "60000",
+        "RUN_MCP_TIMEOUT_MS": "60000"
+      }
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {
+        "START_MCP_TIMEOUT_MS": "30000"
+      }
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-fetch"
+      ]
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "${workspaceFolder}"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "orchestrator-tools": {
+      "_comment": "project-orchestrator-bundle 的 MCP Server：15 个 Tool + MCP Sampling（Skill 复用 Agent LLM）",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/project-orchestrator-bundle/mcp-integration/dist/orchestrator-tools.js"
+      ],
+      "env": {
+        "PROJECT_ROOT": "${workspaceFolder}",
+        "SKILL_BUNDLE_PATH": "${workspaceFolder}/project-orchestrator-bundle",
+        "START_MCP_TIMEOUT_MS": "120000",
+        "RUN_MCP_TIMEOUT_MS": "120000"
+      }
+    }
+  }
+}

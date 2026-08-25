@@ -1,0 +1,26 @@
+{
+  "name": "project-orchestrator-bundle",
+  "version": "1.0.0",
+  "description": "AI Agent 协作编排场景下的项目全生命周期管理工具（Skill Bundle）",
+  "author": "project-orchestrator authors",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "mcp-integration"
+  ],
+  "scripts": {
+    "build": "npm run build -w mcp-integration",
+    "dev": "npm run dev -w mcp-integration",
+    "start": "npm run start -w mcp-integration",
+    "test": "node --test tests/"
+  },
+  "keywords": [
+    "project-management",
+    "spec-driven-development",
+    "openspec",
+    "skill-bundle",
+    "mcp",
+    "ai-agent"
+  ]
+}

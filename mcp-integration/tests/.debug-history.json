@@ -1,0 +1,16 @@
+{
+  "sessions": [
+    {
+      "type": "trace",
+      "errorMessage": "",
+      "frameCount": 3,
+      "timestamp": "2026-08-25T10:18:49.398Z"
+    },
+    {
+      "type": "logs",
+      "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787653129403-engav4\\app.log",
+      "errorCount": 2,
+      "timestamp": "2026-08-25T10:18:49.412Z"
+    }
+  ]
+}

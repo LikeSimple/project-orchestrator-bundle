@@ -1,0 +1,81 @@
+name: full-stack
+version: 1.0.0
+description: 完整 Bundle，覆盖项目全生命周期（15 个子 Skill，适合全栈开发者 / 架构师）
+author: project-orchestrator authors
+license: MIT
+skills:
+  # Phase 1: 项目初始化
+  - name: spec-bootstrap
+    required: true
+    role: 项目初始化规范生成（Spec + Plan + Tasks）
+  - name: code-patterns
+    required: true
+    role: 代码规范注入与继承
+  - name: scaffold-runner
+    required: true
+    role: 17 种技术栈脚手架生成（前端 5 + API 9 + 工具 2 + 测试 1）
+  - name: ui-design
+    required: true
+    role: 单文件 HTML 原型 + 聊天交互调整
+  - name: spec-userstory-to-design
+    required: true
+    role: User Story → Page Flow + Page Detail + OpenAPI
+  - name: api-contract
+    required: true
+    role: OpenAPI 3.1.2 契约生成与校验
+  - name: html-converter
+    required: false
+    role: HTML 原型 → Vue/React 组件
+
+  # Phase 2: 功能变更与实现
+  - name: openspec-workflow
+    required: true
+    role: 提案驱动的变更管理（PROPOSAL → SPEC delta → TASKS → ARCHIVE）
+  - name: implement-executor
+    required: true
+    role: Phase 驱动 LLM Agent 代码生成（任务拆解 + 编码 + 自检 + Checkpoint 门禁）
+  - name: test-runner
+    required: true
+    role: 自动化测试执行 + 覆盖率门禁
+  - name: git-workflow
+    required: true
+    role: Git 工作流（commit + PR + conflict + tag + release + branch + merge + changelog）
+
+  # Phase 3: 质量保障
+  - name: debug-helper
+    required: false
+    role: 错误根因分析 + 修复建议
+  - name: review-checklist
+    required: true
+    role: 7 大类 73 条代码评审规则（BIZ + CONTRACT + SEC + PERF + MAINT + TEST + PATTERN）
+  - name: dependency-auditor
+    required: false
+    role: 真实 npm audit + License 合规 + 健康度评分 + 废弃检测
+  - name: environment-manager
+    required: false
+    role: 4 环境管理 + Secrets 注入 + 20+ 敏感字段检测 + 校验
+entry-points:
+  # Phase 1
+  - bootstrap
+  - scaffold
+  - ui.adjust
+  - design
+  - contract
+  - html.convert
+  # Phase 2
+  - change
+  - implement
+  - test
+  - commit
+  # Phase 3
+  - debug
+  - review
+  - audit
+  - env.check
+tags:
+  - project-management
+  - spec-driven-development
+  - full-stack
+  - skill-bundle
+  - mcp-integration
+  - quality-assurance

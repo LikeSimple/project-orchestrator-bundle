@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "description": "Skills 使用 CommonJS 语法（与 skill-cli 保持一致）"
+}

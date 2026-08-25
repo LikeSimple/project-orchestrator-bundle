@@ -1,0 +1,44 @@
+name: frontend-only
+version: 1.0.0
+description: 前端 Bundle（7 个子 Skill，适合前端开发者）
+author: project-orchestrator authors
+license: MIT
+skills:
+  # Phase 1: 前端项目初始化
+  - name: spec-bootstrap
+    required: true
+    role: 项目初始化规范生成（Spec + Plan + Tasks）
+  - name: code-patterns
+    required: true
+    role: 前端代码规范注入（React / Vue3 / TypeScript 模式）
+  - name: scaffold-runner
+    required: true
+    role: 前端脚手架生成（react-vite / vue3-vite / next-app / nuxt-app / flutter-app）
+  - name: ui-design
+    required: true
+    role: 单文件 HTML 原型 + 聊天交互调整
+  - name: spec-userstory-to-design
+    required: true
+    role: User Story → Page Flow + Page Detail + 组件清单
+  - name: html-converter
+    required: true
+    role: HTML 原型 → React TSX / Vue 3 SFC 组件 + 组件拆分
+
+  # Phase 2: 前端测试
+  - name: test-runner
+    required: false
+    role: 前端单元测试 + 组件测试（vitest / jest / cypress / playwright）
+entry-points:
+  - bootstrap
+  - scaffold
+  - ui.adjust
+  - design
+  - html.convert
+  - test
+tags:
+  - frontend
+  - ui-design
+  - component-generation
+  - scaffolding
+  - react
+  - vue

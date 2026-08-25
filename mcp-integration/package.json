@@ -1,0 +1,47 @@
+{
+  "name": "@project-orchestrator/mcp-server",
+  "version": "1.0.0",
+  "description": "orchestrator-tools MCP Server — 将 15 个子 Skill 封装为 MCP Tool",
+  "author": "project-orchestrator authors",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "orchestrator-tools": "./dist/orchestrator-tools.js",
+    "skill-cli": "./dist/skill-cli.cjs"
+  },
+  "main": "./dist/orchestrator-tools.js",
+  "scripts": {
+    "build": "tsc && node scripts/postbuild.js",
+    "build:watch": "tsc --watch",
+    "dev": "tsc --watch",
+    "start": "node dist/orchestrator-tools.js",
+    "test": "npx mocha tests/phase1.test.cjs tests/phase2.test.cjs tests/phase3.test.cjs tests/e2e-pipeline.test.cjs --timeout 60000",
+    "test:phase1": "npx mocha tests/phase1.test.cjs --timeout 60000",
+    "test:phase2": "npx mocha tests/phase2.test.cjs --timeout 60000",
+    "test:phase3": "npx mocha tests/phase3.test.cjs --timeout 60000",
+    "test:e2e": "npx mocha tests/e2e-pipeline.test.cjs --timeout 60000",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "parse5": "^7.1.2",
+    "css-tree": "^3.1.0",
+    "recast": "^0.23.4",
+    "@babel/parser": "^7.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "rimraf": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "project-orchestrator",
+    "skill-bundle"
+  ]
+}

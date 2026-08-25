@@ -1,0 +1,29 @@
+{
+  "name": "contract-tests",
+  "version": "1.0.0",
+  "description": "契约测试模板（test-runner.contract 自动生成示例）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test:contract": "vitest run contract.test.ts",
+    "test:contract:watch": "vitest --watch contract.test.ts",
+    "test:contract:coverage": "vitest run --coverage contract.test.ts",
+    "test:contract:report": "vitest run --coverage --reporter=html contract.test.ts",
+    "lint:contract": "spectral lint ../contracts/openapi.yaml --ruleset spectral.yaml",
+    "lint:contract:fix": "spectral lint --fix ../contracts/openapi.yaml --ruleset spectral.yaml",
+    "mock:start": "prism mock ../contracts/openapi.yaml --port 4010",
+    "coverage:report": "node scripts/generate-coverage-report.js"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.1",
+    "yamljs": "^0.3.0",
+    "@stoplight/spectral": "^6.11.0",
+    "@stoplight/prism-cli": "^5.10.0"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  }
+}

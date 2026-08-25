@@ -1,0 +1,140 @@
+openapi: 3.1.2
+info:
+  title: API Contract
+  version: 0.1.0
+  description: |
+    由 project-orchestrator-bundle / api-contract 自动生成
+    生成时间: 2026-08-25 06:09:54
+    来源文件: 无
+  x-generated-by: project-orchestrator-bundle/api-contract@1.0
+
+servers:
+  - url: https://api.example.com/v1
+    description: 生产
+  - url: http://localhost:8080/v1
+    description: 本地开发
+
+security:
+  - BearerAuth: []
+
+paths:
+  /api/v1/example:
+    get:
+      operationId: listExample
+      summary: listExample（自动生成）
+      tags: [Generated]
+      security:
+        - BearerAuth: []
+      x-page-id: example
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/example/{id}:
+    get:
+      operationId: getExample
+      summary: getExample（自动生成）
+      tags: [Generated]
+      security:
+        - BearerAuth: []
+      x-page-id: {id}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/example:
+    post:
+      operationId: createExample
+      summary: createExample（自动生成）
+      tags: [Generated]
+      security:
+        - BearerAuth: []
+      x-page-id: example
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, traceId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        code: { type: string, example: "U1023" }
+        category:
+          type: string
+          enum: [USER_ERROR, SYSTEM_ERROR, EXTERNAL_ERROR]
+        traceId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: 未认证
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: 无权限
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: 业务校验失败
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: 服务器内部错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

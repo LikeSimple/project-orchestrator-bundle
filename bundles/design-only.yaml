@@ -1,0 +1,38 @@
+name: design-only
+version: 1.0.0
+description: 设计 Bundle（5 个子 Skill，适合产品经理 / 设计师）
+author: project-orchestrator authors
+license: MIT
+skills:
+  # 项目初始化（轻量）
+  - name: spec-bootstrap
+    required: true
+    role: 项目初始化规范生成（Spec + Plan + Tasks）
+
+  # 设计核心
+  - name: ui-design
+    required: true
+    role: 单文件 HTML 原型 + 聊天交互调整 + 设计令牌
+  - name: spec-userstory-to-design
+    required: true
+    role: User Story → Page Flow + 11 章节 Page Detail + OpenAPI + Mermaid 流程图
+  - name: html-converter
+    required: true
+    role: HTML 原型 → React TSX / Vue 3 SFC 组件 + 组件拆分 + TypeScript 类型
+
+  # 设计审查
+  - name: review-checklist
+    required: false
+    role: 设计评审（一致性 + 可访问性 + 代码规范）
+entry-points:
+  - bootstrap
+  - ui.adjust
+  - design
+  - html.convert
+  - review
+tags:
+  - product-management
+  - ui-design
+  - page-design
+  - design-review
+  - prototype

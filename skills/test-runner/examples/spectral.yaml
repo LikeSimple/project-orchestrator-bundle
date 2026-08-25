@@ -1,0 +1,193 @@
+# Spectral lint 配置（OpenAPI 契约验证）
+# 由 project-orchestrator-bundle / review-checklist 自动生成
+
+extends: spectral:oas
+
+rules:
+  # ============ 通用 OAS 规则 ============
+  operation-operationId: error
+  operation-description: warn
+  operation-tags: error
+  oas3-api-servers: error
+  info-contact: warn
+  info-license: warn
+  openapi-tags-alphabetical: off  # 我们按业务模块分组
+
+  # ============ 项目自定义规则（必须满足）============
+  # 强制每个 operation 有 operationId
+  operation-operationId: error
+
+  # 强制 Problem+JSON schema 用于错误响应
+  problem-schemas-defined:
+    description: 所有 4xx/5xx 响应必须引用 Problem schema
+    severity: error
+    given: $.paths.*.*.responses.[4-5][0-9][0-9].content.[application/problem+json].schema
+    then:
+      field: $ref
+      function: truthy
+
+  # 强制 traceId 字段在 Problem schema 中存在
+  problem-trace-id-required:
+    description: Problem schema 必须包含 traceId 字段
+    severity: error
+    given: $.components.schemas.Problem.properties
+    then:
+      field: traceId
+      function: truthy
+
+  # 强制 traceId 在 required 数组
+  problem-trace-id-in-required:
+    description: traceId 必须在 Problem schema 的 required 列表中
+    severity: error
+    given: $.components.schemas.Problem
+    then:
+      field: required
+      function: truthy
+
+  # ============ 安全规则 ============
+  # 强制 protected endpoint 有 security（除公开端点外）
+  operation-has-security:
+    description: 非公开 endpoint 必须有 security 声明
+    severity: error
+    given: $.paths.*.*.responses.[2-5][0-9][0-9]
+    then:
+      field: security
+      function: truthy
+    exceptions:
+      - /auth/login
+      - /auth/sms
+      - /auth/oauth/douyin
+      - /webhooks/*
+
+  # 强制安全方案使用 JWT 而非 Basic
+  prefer-jwt-over-basic:
+    description: 优选 JWT Bearer 而非 Basic Auth
+    severity: warn
+    given: $.components.securitySchemes
+    then:
+      field: type
+      function: pattern
+      functionOptions:
+        value: '^(http|oauth2|openIdConnect)$'
+
+  # ============ 命名规则 ============
+  # operationId 用 camelCase
+  operation-id-camel-case:
+    description: operationId 必须使用 camelCase
+    severity: warn
+    given: $.paths.*.*.operationId
+    then:
+      function: pattern
+      functionOptions:
+        value: '^[a-z][a-zA-Z0-9]*$'
+
+  # 禁止下划线（除非合理）
+  no-underscore-in-operation-id:
+    description: operationId 不应包含下划线
+    severity: warn
+    given: $.paths.*.*.operationId
+    then:
+      field: $this
+      function: pattern
+      functionOptions:
+        notMatch: '_'
+
+  # ============ Schema 规则 ============
+  # 禁止 any 类型
+  no-any-type:
+    description: 不允许使用 any 类型
+    severity: warn
+    given: $.components.schemas.*.properties.*.type
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: 'any'
+
+  # 禁止空 schema
+  no-empty-schemas:
+    description: 不允许空 schema
+    severity: error
+    given: $.components.schemas.*
+    then:
+      field: type
+      function: truthy
+
+  # 强制 ID 字段格式
+  id-format-uuid:
+    description: ID 字段必须使用 UUID 格式
+    severity: warn
+    given: $.components.schemas.*.properties.id
+    then:
+      field: format
+      function: equal
+      functionOptions:
+        value: uuid
+
+  # 强制时间字段使用 ISO 8601
+  datetime-format-iso:
+    description: 时间字段必须使用 date-time 格式
+    severity: warn
+    given: $.components.schemas.*.properties[createdAt|updatedAt|expiresAt|boundAt|disabledAt|dueDate|timestamp].format
+    then:
+      function: equal
+      functionOptions:
+        value: date-time
+
+  # ============ 必填字段规则 ============
+  # POST/PUT 请求体必须有 required
+  request-body-has-required:
+    description: 写操作 requestBody 必须有 required 字段
+    severity: error
+    given: $.paths.*.[post|put|patch].requestBody.content.[application/json].schema
+    then:
+      field: required
+      function: truthy
+
+  # 列表响应的 items 不能为空 schema
+  list-items-defined:
+    description: 列表响应的 items 必须定义 schema
+    severity: error
+    given: $.paths.*.get.responses.200.content.[application/json].schema.properties.items
+    then:
+      field: $ref
+      function: truthy
+
+  # ============ 文档质量 ============
+  # 强制每个 operation 有 summary
+  operation-summary-required:
+    description: 每个 operation 必须有 summary
+    severity: warn
+    given: $.paths.*.*
+    then:
+      field: summary
+      function: truthy
+
+  # tag 必须有 description
+  tag-description-required:
+    description: 每个 tag 应该有 description
+    severity: warn
+    given: $.tags.*
+    then:
+      field: description
+      function: truthy
+
+  # ============ 弃用警告 ============
+  # 标记 deprecated 操作
+  mark-deprecated-operations:
+    description: 不再使用的 endpoint 应该标记 deprecated: true
+    severity: info
+    given: $.paths.*.*
+    then:
+      field: deprecated
+      function: falsy
+
+  # ============ 业务规则 ============
+  # 错误码格式校验（code 字段必须是 U/S/E 开头）
+  business-error-code-format:
+    description: 业务错误码必须以 U/S/E 开头（USER/SYSTEM/EXTERNAL）
+    severity: warn
+    given: $.components.schemas.Problem.properties.code.examples
+    then:
+      function: pattern
+      functionOptions:
+        match: '^[USE][0-9]{4}$'
