@@ -100,11 +100,11 @@
 | # | Skill 名称 | v7 | v8 | 变化 | LLM 深度集成 | 一句话评价 |
 |---|---|---|---|---|---|---|
 | 8 | **openspec-workflow** | 65% | **72%** | ↑ +7 | ✅ `analyzeCodePatterns`（v8） | **三层架构：AST影响→模式检测→LLM深度分析** |
-| 9 | **implement-executor** | 78% | 78% | → | ✅ 已有深度集成 | AST + MCP Sampling + 语法验证 |
+| 9 | **implement-executor** | 78% | **85%** | ↑ +7 | ✅ 已有深度集成 | AST + MCP Sampling + 语法验证 + **断点恢复（resume/rollback/abort）** |
 | 10 | **test-runner** | 72% | **78%** | ↑ +6 | ✅ `analyzeError`+`reviewCode`（v8） | **双方法：失败分析+契约审查** |
 | 11 | **git-workflow** | 92% | 92% | → | ✅ `generateCommitMessage`（v7） | AST diff + LLM commit message + 降级方案 |
 
-**Phase 2 平均：80%（v7: 77%，↑ +3）**
+**Phase 2 平均：82%（v7: 77%，↑ +5）**
 
 ### Phase 3 · 质量保障（4 个）
 
@@ -124,7 +124,7 @@
 | 阶段 | v7 平均 | v8 平均 | 变化 | 核心变化 |
 |---|---|---|---|---|
 | **Phase 1 · 项目初始化** | 78% | 80% | ↑ +2 | spec-bootstrap/scaffold-runner/api-contract/html-converter 4 个 Skill 新增结构化 LLM |
-| **Phase 2 · 功能变更与实现** | 77% | 80% | ↑ +3 | openspec-workflow 三层架构 + test-runner 双方法集成 |
+| **Phase 2 · 功能变更与实现** | 77% | 82% | ↑ +5 | openspec-workflow 三层架构 + test-runner 双方法 + implement-executor 断点恢复 |
 | **Phase 3 · 质量保障** | 79% | 80% | ↑ +1 | debug-helper 全函数迁移到 analyzeError |
 
 ---
@@ -282,7 +282,7 @@ v6 已完成全量同步，v7/v8 无文档变更。
 | # | 差距 | v7 状态 | v8 状态 | 影响 | 优先级 |
 |---|---|---|---|---|---|
 | 3-7 | ~~npm audit / Doppler/Vault / 弱断言 / schema / E2E~~ | 保持 | 保持 | — | ~~P1~~ 已解决 |
-| 8 | **缺少 pipeline 断点恢复** | 保持 | 保持 | implement 阶段失败后需从头重来 | P2 |
+| 8 | ~~**缺少 pipeline 断点恢复**~~ | 保持 | ✅ **已解决** | ~~implement 阶段失败后需从头重来~~ → 实现 resume/rollback/abort + 重试预算 + 状态验证 + 跳过失败任务 | ~~P2~~ ✅ v8 已解决 |
 | 9 | ~~**7/15 Skill LLM 未结构化**~~ | ~~新发现~~ | ✅ **已解决** | ~~有 callLLM 但 prompt 通用~~ → 15/15 Skill 使用结构化方法，残留 14 个 callLLM 均为特定 JSON 格式 + 正确解析 + 错误处理 | ~~P2~~ ✅ v8 已解决 |
 
 ### 🟢 低风险 / 优化项
@@ -312,7 +312,7 @@ v7→v8 的核心进步：
 **距离 Phase 4（生产就绪）的主要差距**：
 1. ~~LLM 深度集成~~ → ✅ 15/15 全量深度集成（v8 完成）
 2. ~~7/15 Skill LLM 未结构化~~ → ✅ 0/15，残留 14 个 callLLM 均有正确解析（v8 完成）
-3. pipeline 断点恢复机制
+3. ~~pipeline 断点恢复机制~~ → ✅ resume/rollback/abort + 重试预算 + 状态验证（v8 完成）
 4. 性能基线数据
 5. 真实 macOS/Linux 手动验证
 
@@ -337,7 +337,7 @@ v7→v8 的核心进步：
 | # | 任务 | 预期效果 | 优先级 |
 |---|---|---|---|
 | 8 | ~~**7 个 Skill LLM 结构化**~~ | ~~spec-bootstrap/scaffold-runner/api-contract/html-converter/openspec/test-runner/debug-helper 使用专用方法~~ | ~~P2~~ ✅ v8 完成 |
-| 9 | ~~**pipeline 断点恢复**~~ → 保留 | implement-executor 增 `resume` 命令 | P2 |
+| 9 | ~~**pipeline 断点恢复**~~ | ~~implement-executor 增 `resume` 命令~~ | ~~P2~~ ✅ v8 完成 |
 | 10 | **性能基线测试** | 测量各 Skill 执行时间/LLM 延迟 | P3 |
 | 11 | **编排状态机** | 主 Skill 自动串联 Phase 1→2→3 | P3 |
 
@@ -362,6 +362,7 @@ v7→v8 的核心进步：
 - **三层架构**：从"AST 预检测 → LLM 深度分析"双层升级为三层（AST 影响分析 → 代码模式检测 → LLM 深度分析），openspec-workflow 落地
 - **llm-client.js 方法体系**：从 9 个扩展到 10 个结构化方法，新增 `analyzeError`，`customSystem` 参数解决定制 prompt 与结构化方法的矛盾
 - **v2 问题 #13 最终修复**：LLM 集成深度从 75% → 95%，从 P2 降为 ✅ 已解决
+- **中风险 #8 解决**：pipeline 断点恢复机制 — resume/rollback/abort + 重试预算 + 状态验证 + 跳过失败任务
 - **中风险 #9 解决**：7/15 Skill LLM 未结构化 → 0/15，残留 14 个 callLLM 均为特定 JSON 格式 + 正确解析 + 错误处理
 
 ### 数字对比
@@ -383,7 +384,7 @@ v2 的 18 个关键问题已 **全部完全修复**。v8 的核心突破是完�
 
 ### 最大的挑战
 
-~~7/15 Skill 有 LLM 调用但未使用结构化方法（spec-bootstrap/scaffold-runner/api-contract/html-converter/openspec/test-runner/debug-helper）。这些 Skill 的 prompt 通用、结果解析粗糙，需要逐个接入专用便捷方法。完成后 LLM 集成深度可达 90%+，接近生产就绪。~~ ✅ v8 已完成：15/15 Skill 全量迁移到结构化方法，LLM 集成深度达 95%。剩余挑战为 pipeline 断点恢复 + 性能基线数据。
+~~7/15 Skill 有 LLM 调用但未使用结构化方法（spec-bootstrap/scaffold-runner/api-contract/html-converter/openspec/test-runner/debug-helper）。这些 Skill 的 prompt 通用、结果解析粗糙，需要逐个接入专用便捷方法。完成后 LLM 集成深度可达 90%+，接近生产就绪。~~ ✅ v8 已完成：15/15 Skill 全量迁移到结构化方法，LLM 集成深度达 95%。pipeline 断点恢复也已实现（resume/rollback/abort）。剩余挑战为性能基线数据。
 
 ### 最大的优势
 

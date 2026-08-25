@@ -440,6 +440,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
 
     {
+      name: 'implement_executor_resume',
+      description: 'implement-executor.resume — 断点恢复：从上次暂停/中断的状态继续执行（支持跳过失败任务）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          featureId: { type: 'string', description: '如 "001-init"' },
+          skipFailedTasks: { type: 'boolean', default: false, description: '跳过当前失败的任务，继续执行后续任务' },
+          fromPhase: { type: 'integer', description: '从指定 Phase 开始执行（跳过之前的 Phase）' },
+        },
+      },
+    },
+
+    {
+      name: 'implement_executor_status',
+      description: 'implement-executor.status — 查看任务进度 + 断点恢复状态（暂停/失败/跳过/重试预算）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          featureId: { type: 'string', description: '如 "001-init"' },
+        },
+      },
+    },
+
+    {
+      name: 'implement_executor_rollback',
+      description: 'implement-executor.rollback — 回滚到 pre-run git HEAD 并清理状态文件（git reset --hard）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          featureId: { type: 'string', description: '如 "001-init"' },
+          toHead: { type: 'string', description: '指定回滚目标 commit hash（不指定则使用 originalGitHead）' },
+        },
+      },
+    },
+
+    {
       name: 'test_runner_run',
       description: 'test-runner.run — 运行测试 + 覆盖率 + 契约验证',
       inputSchema: {
@@ -650,6 +686,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           projectRoot: PROJECT_ROOT,
         }, {
           timeoutMs: 300_000,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'implement_executor_resume': {
+        const result = await callSkill('implement-executor', 'resume', {
+          featureId: args.featureId,
+          skipFailedTasks: args.skipFailedTasks ?? false,
+          fromPhase: args.fromPhase ?? null,
+          projectRoot: PROJECT_ROOT,
+        }, {
+          timeoutMs: 300_000,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'implement_executor_status': {
+        const result = await callSkill('implement-executor', 'status', {
+          featureId: args.featureId,
+          projectRoot: PROJECT_ROOT,
+        }, {
+          timeoutMs: 30_000,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'implement_executor_rollback': {
+        const result = await callSkill('implement-executor', 'rollback', {
+          featureId: args.featureId,
+          toHead: args.toHead ?? null,
+          projectRoot: PROJECT_ROOT,
+        }, {
+          timeoutMs: 30_000,
         });
         return formatSkillResult(result);
       }

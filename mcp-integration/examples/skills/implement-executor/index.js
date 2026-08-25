@@ -10,8 +10,23 @@
  * 命令：
  *   task       - 执行单个任务
  *   batch      - 批量执行多个任务
- *   dry-run    - 预览任务执行计划（不实际写文件）
- *   status     - 查看任务进度
+ *   status     - 查看任务进度（含断点恢复状态）
+ *   run        - Phase 驱动编排：按 Phase 顺序执行全部任务
+ *   resume     - 从上次暂停/中断的状态继续执行（断点恢复）
+ *                  选项：skipFailedTasks - 跳过失败任务
+ *                        fromPhase       - 从指定 Phase 开始
+ *   abort      - 中止执行（选项：rollback - 自动回滚到 pre-run HEAD）
+ *   rollback   - 回滚到 pre-run git HEAD 并清理状态
+ *   checkpoint - 手动运行检查（test/lint/typecheck）
+ *
+ * 断点恢复机制（v8）：
+ *   - .implement-state.json 持久化：completedTasks/failedTasks/failedTaskDetails/
+ *     checkpointFailures/retryBudget/progress/tasksMdHash/originalGitHead
+ *   - resume 支持 skipFailedTasks 跳过持续失败的任务
+ *   - retryBudget 跟踪跨 resume 的重试次数（maxRetryBudget=9）
+ *   - validateStateForResume 检测 tasks.md 和 git HEAD 变更
+ *   - rollback 命令支持 git reset --hard 回滚到 pre-run 状态
+ *   - status 命令显示完整暂停/失败/跳过/重试预算信息
  *
  * 对应 MCP Tools: implement_task, implement_batch, implement_status
  */
@@ -752,6 +767,148 @@ async function loadState(cwd) {
   }
 }
 
+// ============================================================
+// Pipeline 断点恢复辅助函数
+// ============================================================
+
+const crypto = require('crypto');
+
+/**
+ * 计算内容的简单哈希，用于检测 tasks.md 是否变更
+ */
+function hashContent(content) {
+  return crypto.createHash('md5').update(content).digest('hex').slice(0, 12);
+}
+
+/**
+ * 从 phases 和 state 计算进度统计
+ */
+function computeProgress(phases, state) {
+  const allTasks = phases.flatMap(p => p.tasks);
+  const total = allTasks.length;
+  const completed = (state.completedTasks || []).filter(id =>
+    allTasks.some(t => t.id === id)
+  ).length;
+  const failed = (state.failedTasks || []).filter(id =>
+    allTasks.some(t => t.id === id)
+  ).length;
+  const remaining = total - completed - failed;
+  return { total, completed, failed, remaining };
+}
+
+/**
+ * 状态初始化：构建完整的断点恢复状态对象
+ */
+function createInitialState({ feature, tasksPath, tasksContent, phases, cwd, gitHead }) {
+  const now = new Date().toISOString();
+  return {
+    feature,
+    tasksPath: path.relative(cwd, tasksPath),
+    tasksMdHash: hashContent(tasksContent),
+    originalGitHead: gitHead,
+    currentPhase: phases.length ? phases[0].phase : 0,
+    totalPhases: phases.length,
+    completedTasks: [],
+    failedTasks: [],
+    failedTaskDetails: [],
+    checkpointFailures: [],
+    retryBudget: {},
+    maxRetryBudget: 9,
+    lastCheckpoint: null,
+    gitHead,
+    status: 'running',
+    startedAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * 兼容旧状态：补全 v8 新增字段（向后兼容 v7 状态文件）
+ */
+function ensureStateFields(state) {
+  if (!state.failedTaskDetails) state.failedTaskDetails = [];
+  if (!state.checkpointFailures) state.checkpointFailures = [];
+  if (!state.retryBudget) state.retryBudget = {};
+  if (state.maxRetryBudget == null) state.maxRetryBudget = 9;
+  if (!state.tasksMdHash) state.tasksMdHash = null;
+  if (!state.originalGitHead) state.originalGitHead = state.gitHead || null;
+  return state;
+}
+
+/**
+ * 记录任务失败详情到状态
+ */
+function recordTaskFailure(state, { taskId, error, attemptCount, phase, phaseName }) {
+  if (!state.failedTaskDetails) state.failedTaskDetails = [];
+  // 移除同任务的旧记录，保留最新
+  state.failedTaskDetails = state.failedTaskDetails.filter(d => d.taskId !== taskId);
+  state.failedTaskDetails.push({
+    taskId,
+    error: (error || '').slice(0, 500),
+    attemptCount,
+    phase,
+    phaseName,
+    failedAt: new Date().toISOString(),
+  });
+  if (!state.failedTasks.includes(taskId)) {
+    state.failedTasks.push(taskId);
+  }
+  // 更新重试预算
+  if (!state.retryBudget) state.retryBudget = {};
+  state.retryBudget[taskId] = (state.retryBudget[taskId] || 0) + attemptCount;
+}
+
+/**
+ * 记录 checkpoint 失败到状态
+ */
+function recordCheckpointFailure(state, { failures, phase, phaseName }) {
+  if (!state.checkpointFailures) state.checkpointFailures = [];
+  state.checkpointFailures.push({
+    phase,
+    phaseName,
+    failures: failures.map(f => ({ name: f.name, details: (f.details || '').slice(0, 300) })),
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/**
+ * 清除任务的失败记录（任务重试或跳过时调用）
+ */
+function clearTaskFailure(state, taskId) {
+  state.failedTasks = (state.failedTasks || []).filter(id => id !== taskId);
+  state.failedTaskDetails = (state.failedTaskDetails || []).filter(d => d.taskId !== taskId);
+}
+
+/**
+ * 验证状态是否仍有效（tasks.md 未被手动修改、git HEAD 未意外移动）
+ */
+async function validateStateForResume(state, cwd, tasksPath) {
+  const warnings = [];
+
+  // 1. 检查 tasks.md 是否被手动修改
+  if (state.tasksMdHash) {
+    try {
+      const currentContent = await fs.readFile(tasksPath, 'utf-8');
+      const currentHash = hashContent(currentContent);
+      if (currentHash !== state.tasksMdHash) {
+        warnings.push(`⚠️ tasks.md has been modified since the run started (hash: ${state.tasksMdHash} → ${currentHash}). Task IDs may have changed.`);
+      }
+    } catch { /* tasks.md may have moved */ }
+  }
+
+  // 2. 检查 git HEAD 是否意外移动
+  if (state.originalGitHead) {
+    try {
+      const currentHead = await getGitHead(cwd);
+      if (currentHead && currentHead !== state.originalGitHead) {
+        warnings.push(`⚠️ Git HEAD has moved since the run started (${state.originalGitHead.slice(0, 8)} → ${currentHead.slice(0, 8)}). Completed task commits are preserved.`);
+      }
+    } catch { /* not a git repo */ }
+  }
+
+  return warnings;
+}
+
 /**
  * Git commit 辅助：add 指定文件并 commit。不是 git 仓库或无可提交内容时静默跳过（优雅降级）。
  */
@@ -1062,18 +1219,88 @@ async function implementStatus({ featureId, projectRoot }) {
 
   const tasksContent = await fs.readFile(tasksPath, 'utf-8');
   const tasks = extractAllTasks(tasksContent);
+  const state = await loadState(cwd);
 
   const done = tasks.filter(t => t.done).length;
   const total = tasks.length;
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
 
+  // 从 state 读取断点恢复信息
+  const stateInfo = state ? {
+    status: state.status || 'unknown',
+    currentPhase: state.currentPhase,
+    totalPhases: state.totalPhases,
+    feature: state.feature,
+    startedAt: state.startedAt,
+    updatedAt: state.updatedAt,
+    lastCheckpoint: state.lastCheckpoint,
+    progress: state.progress || null,
+    failedTasks: state.failedTasks || [],
+    failedTaskDetails: (state.failedTaskDetails || []).map(d => ({
+      taskId: d.taskId,
+      error: (d.error || '').slice(0, 200),
+      attemptCount: d.attemptCount,
+      phase: d.phase,
+      failedAt: d.failedAt,
+    })),
+    checkpointFailures: state.checkpointFailures || [],
+    skippedTasks: state.skippedTasks || [],
+    retryBudget: state.retryBudget || {},
+  } : null;
+
+  // 构建 summary
+  let summary = `📊 ${done}/${total} tasks done (${progress}%)`;
+  if (stateInfo) {
+    const statusIcons = { running: '🔄', paused: '⏸️', completed: '✅', aborted: '⏹️', 'rolled-back': '↩️' };
+    const icon = statusIcons[stateInfo.status] || '❓';
+    summary = `${icon} [${stateInfo.status}] ${done}/${total} tasks done (${progress}%)`;
+    if (stateInfo.failedTasks.length > 0) {
+      summary += ` | ${stateInfo.failedTasks.length} failed`;
+    }
+    if (stateInfo.skippedTasks.length > 0) {
+      summary += ` | ${stateInfo.skippedTasks.length} skipped`;
+    }
+  }
+
+  const warnings = [];
+  const nextActions = [];
+
+  if (stateInfo && stateInfo.status === 'paused') {
+    warnings.push(`Execution is paused at Phase ${stateInfo.currentPhase}`);
+    if (stateInfo.failedTaskDetails.length > 0) {
+      for (const detail of stateInfo.failedTaskDetails) {
+        warnings.push(`  ${detail.taskId}: ${detail.error.slice(0, 100)}... (${detail.attemptCount} attempts)`);
+      }
+    }
+    nextActions.push('Run `implement resume` to continue');
+    if (stateInfo.failedTasks.length > 0) {
+      nextActions.push('Run `implement resume --skipFailedTasks` to skip failed tasks');
+      nextActions.push('Run `implement rollback` to revert to pre-run state');
+    }
+  } else if (stateInfo && stateInfo.status === 'aborted') {
+    warnings.push('Execution was aborted');
+    nextActions.push('Run `implement run` to start fresh');
+    if (state.originalGitHead) {
+      nextActions.push('Run `implement rollback` to revert to pre-run state');
+    }
+  } else if (done < total) {
+    nextActions.push('Run `implement batch` to continue');
+    if (stateInfo) {
+      nextActions.push('Run `implement resume` to continue from pause point');
+    }
+  } else {
+    nextActions.push('All tasks done! 🎉');
+  }
+  nextActions.push('Run `openspec apply` to apply the change');
+
   return {
     ok: true,
     data: {
-      summary: `📊 ${done}/${total} tasks done (${progress}%)`,
+      summary,
       done,
       total,
       progress,
+      state: stateInfo,
       llmEnhanced: false,
       llmProvider: null,
       tasks: tasks.map(t => ({
@@ -1082,18 +1309,16 @@ async function implementStatus({ featureId, projectRoot }) {
         done: t.done,
         parallel: t.parallel,
         storyId: t.storyId,
+        failed: stateInfo ? stateInfo.failedTasks.includes(t.id) : false,
       })),
     },
-    warnings: [],
-    nextActions: [
-      done < total ? `Run \`implement batch\` to continue` : 'All tasks done! 🎉',
-      'Run `openspec apply` to apply the change',
-    ],
+    warnings,
+    nextActions,
   };
 }
 
 // ============================================================
-// Phase 驱动编排：run / resume / abort / checkpoint / report
+// Phase 驱动编排 + 断点恢复：run / resume / abort / rollback / checkpoint / report
 // ============================================================
 
 /**
@@ -1168,22 +1393,15 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
 
   // 2. 加载或初始化状态
   const now = new Date().toISOString();
+  const gitHead = await getGitHead(cwd);
   let state = await loadState(cwd);
   if (!state) {
-    state = {
+    state = createInitialState({
       feature: featureId || path.basename(path.dirname(tasksPath)),
-      tasksPath: path.relative(cwd, tasksPath),
-      currentPhase: phases.length ? phases[0].phase : 0,
-      totalPhases: phases.length,
-      completedTasks: [],
-      failedTasks: [],
-      lastCheckpoint: null,
-      gitHead: await getGitHead(cwd),
-      status: 'running',
-      startedAt: now,
-      updatedAt: now,
-    };
+      tasksPath, tasksContent, phases, cwd, gitHead,
+    });
   } else {
+    ensureStateFields(state);
     state.status = 'running';
     state.updatedAt = now;
   }
@@ -1255,11 +1473,16 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
         // Git commit
         await gitCommit(cwd, `feat(${freshTask.id}): ${freshTask.description}`);
       } else {
-        // 任务失败 → 保存状态，暂停执行
-        if (!state.failedTasks.includes(freshTask.id)) {
-          state.failedTasks.push(freshTask.id);
-        }
+        // 任务失败 → 记录详情，保存状态，暂停执行
+        recordTaskFailure(state, {
+          taskId: freshTask.id,
+          error: result.lastError,
+          attemptCount: result.attempts.length,
+          phase: phase.phase,
+          phaseName: phase.name,
+        });
         state.status = 'paused';
+        state.progress = computeProgress(phases, state);
         state.updatedAt = new Date().toISOString();
         await saveState(cwd, state);
 
@@ -1282,6 +1505,7 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
       }
 
       state.updatedAt = new Date().toISOString();
+      state.progress = computeProgress(phases, state);
       await saveState(cwd, state);
     }
 
@@ -1292,8 +1516,14 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
     };
     const checkpointResult = await runCheckpoint(cwd, phaseInfo);
     if (!checkpointResult.passed) {
+      recordCheckpointFailure(state, {
+        failures: checkpointResult.failures,
+        phase: phase.phase,
+        phaseName: phase.name,
+      });
       state.status = 'paused';
       state.lastCheckpoint = new Date().toISOString();
+      state.progress = computeProgress(phases, state);
       state.updatedAt = new Date().toISOString();
       await saveState(cwd, state);
       return {
@@ -1314,12 +1544,14 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
 
     state.currentPhase = phase.phase + 1;
     state.lastCheckpoint = new Date().toISOString();
+    state.progress = computeProgress(phases, state);
     state.updatedAt = new Date().toISOString();
     await saveState(cwd, state);
   }
 
   // 5. 全部完成
   state.status = 'completed';
+  state.progress = computeProgress(phases, state);
   state.updatedAt = new Date().toISOString();
   await saveState(cwd, state);
 
@@ -1347,8 +1579,13 @@ async function runPhases({ featureId, projectRoot, dryRun = false, maxRetries = 
 
 /**
  * resume 命令：从上次暂停/中断的状态继续执行。
+ *
+ * 选项：
+ *   skipFailedTasks - 跳过当前失败的任务，继续执行后续任务
+ *   fromPhase       - 从指定 Phase 开始执行（跳过之前的 Phase）
+ *   projectRoot     - 项目根目录
  */
-async function resume({ featureId, projectRoot }) {
+async function resume({ featureId, projectRoot, skipFailedTasks = false, fromPhase = null } = {}) {
   const cwd = projectRoot || process.cwd();
   const state = await loadState(cwd);
   if (!state) {
@@ -1360,18 +1597,80 @@ async function resume({ featureId, projectRoot }) {
   if (state.status === 'aborted') {
     return { ok: false, error: 'Execution was aborted. Start a new run instead.', data: { state, llmEnhanced: false, llmProvider: null }, warnings: [], nextActions: ['Run `implement run` to start fresh'] };
   }
+
+  ensureStateFields(state);
+
+  // 定位 tasks.md 用于状态验证
+  const tasksPath = await findTasksPath(cwd, featureId || state.feature);
+  const validationWarnings = tasksPath
+    ? await validateStateForResume(state, cwd, tasksPath)
+    : [];
+
+  // 跳过失败任务：标记为 skipped，清除失败记录
+  if (skipFailedTasks && state.failedTasks.length > 0) {
+    const skipped = [...state.failedTasks];
+    for (const taskId of skipped) {
+      clearTaskFailure(state, taskId);
+      // 标记为已完成（跳过）以防止 runPhases 再次执行
+      if (!state.completedTasks.includes(taskId)) {
+        state.completedTasks.push(taskId);
+      }
+    }
+    state.skippedTasks = [...(state.skippedTasks || []), ...skipped];
+    validationWarnings.push(`⏭️ Skipped failed tasks: ${skipped.join(', ')}`);
+  }
+
+  // 从指定 Phase 开始：更新 currentPhase
+  if (fromPhase != null) {
+    state.currentPhase = fromPhase;
+    validationWarnings.push(`📍 Resuming from Phase ${fromPhase}`);
+  }
+
+  // 检查重试预算：如果失败任务已超出预算，自动跳过
+  const budgetWarnings = [];
+  if (!skipFailedTasks) {
+    for (const detail of state.failedTaskDetails) {
+      const budget = state.retryBudget[detail.taskId] || 0;
+      if (budget >= state.maxRetryBudget) {
+        budgetWarnings.push(
+          `⚠️ Task ${detail.taskId} has exceeded retry budget (${budget}/${state.maxRetryBudget}). Use --skipFailedTasks to skip it.`
+        );
+      }
+    }
+  }
+
+  // 保存更新后的状态
+  state.status = 'running';
+  state.updatedAt = new Date().toISOString();
+  await saveState(cwd, state);
+
   // 从 state.currentPhase 继续
-  return await runPhases({ featureId: featureId || state.feature, projectRoot: cwd, dryRun: false });
+  const result = await runPhases({
+    featureId: featureId || state.feature,
+    projectRoot: cwd,
+    dryRun: false,
+  });
+
+  // 合并验证 warnings
+  if (result.warnings) {
+    result.warnings = [...validationWarnings, ...budgetWarnings, ...result.warnings];
+  } else {
+    result.warnings = [...validationWarnings, ...budgetWarnings];
+  }
+
+  return result;
 }
 
 /**
  * abort 命令：中止执行，保存状态，提供回滚信息。
+ *
+ * 选项：
+ *   rollback - 中止后自动执行 git reset 回滚到 pre-run HEAD
  */
-async function abort({ featureId, reason, projectRoot }) {
+async function abort({ featureId, reason, projectRoot, rollback = false } = {}) {
   const cwd = projectRoot || process.cwd();
   let state = await loadState(cwd);
   if (!state) {
-    // 如果没有状态文件，创建一个基本的 aborted 状态
     state = {
       feature: featureId || 'unknown',
       status: 'aborted',
@@ -1382,6 +1681,7 @@ async function abort({ featureId, reason, projectRoot }) {
       updatedAt: new Date().toISOString(),
     };
   } else {
+    ensureStateFields(state);
     state.status = 'aborted';
     state.abortReason = reason || 'User aborted';
     state.updatedAt = new Date().toISOString();
@@ -1389,25 +1689,126 @@ async function abort({ featureId, reason, projectRoot }) {
   await saveState(cwd, state);
 
   const gitStatus = await getGitStatus(cwd);
+  const warnings = [`Aborted: ${state.abortReason}`];
+  const nextActions = ['Review git status', 'Use `git reset` to rollback if needed', 'Run `implement run` to start over'];
+
+  const data = {
+    summary: '⏹️ Execution aborted',
+    state,
+    gitStatus,
+    rollbackInfo: {
+      completedTasks: state.completedTasks,
+      failedTasks: state.failedTasks,
+      gitHead: state.gitHead,
+      originalGitHead: state.originalGitHead,
+      suggestion: 'Use git reset to rollback to previous state',
+    },
+    llmEnhanced: false,
+    llmProvider: llm.getProviderName(),
+  };
+
+  // 自动回滚
+  if (rollback && state.originalGitHead) {
+    const rollbackResult = await doGitRollback(cwd, state.originalGitHead);
+    if (rollbackResult.rolled) {
+      data.rollbackResult = rollbackResult;
+      warnings.push(`🔄 Rolled back to ${state.originalGitHead.slice(0, 8)}`);
+      nextActions.unshift('Review the rollback with `git log --oneline -5`');
+    } else {
+      warnings.push(`⚠️ Rollback failed: ${rollbackResult.reason}`);
+    }
+  }
+
+  return {
+    ok: true,
+    data,
+    warnings,
+    nextActions,
+  };
+}
+
+/**
+ * rollback 命令：回滚到 pre-run git HEAD 并清理状态文件。
+ * 仅回滚 implement-executor 产生的提交，不影响手动提交。
+ */
+async function rollback({ featureId, projectRoot, toHead = null } = {}) {
+  const cwd = projectRoot || process.cwd();
+  const state = await loadState(cwd);
+
+  if (!state && !toHead) {
+    return {
+      ok: false,
+      error: 'No previous state found. Cannot determine rollback target.',
+      data: { llmEnhanced: false, llmProvider: null },
+      warnings: [],
+      nextActions: ['Specify --toHead=<commit-hash> or run `implement run` first'],
+    };
+  }
+
+  const targetHead = toHead || (state && state.originalGitHead) || null;
+  if (!targetHead) {
+    return {
+      ok: false,
+      error: 'No originalGitHead in state. Use --toHead=<commit-hash> to specify target.',
+      data: { state, llmEnhanced: false, llmProvider: null },
+      warnings: [],
+      nextActions: ['Specify --toHead=<commit-hash>'],
+    };
+  }
+
+  const rollbackResult = await doGitRollback(cwd, targetHead);
+
+  // 清理状态文件
+  if (state) {
+    state.status = 'rolled-back';
+    state.rollbackTarget = targetHead;
+    state.updatedAt = new Date().toISOString();
+    await saveState(cwd, state);
+  }
 
   return {
     ok: true,
     data: {
-      summary: '⏹️ Execution aborted',
+      summary: rollbackResult.rolled
+        ? `🔄 Rolled back to ${targetHead.slice(0, 8)}`
+        : `⚠️ Rollback skipped: ${rollbackResult.reason}`,
+      targetHead,
+      rollbackResult,
       state,
-      gitStatus,
-      rollbackInfo: {
-        completedTasks: state.completedTasks,
-        failedTasks: state.failedTasks,
-        gitHead: state.gitHead,
-        suggestion: 'Use git reset to rollback to previous state',
-      },
       llmEnhanced: false,
       llmProvider: llm.getProviderName(),
     },
-    warnings: [`Aborted: ${state.abortReason}`],
-    nextActions: ['Review git status', 'Use `git reset` to rollback if needed', 'Run `implement run` to start over'],
+    warnings: rollbackResult.rolled
+      ? [`All commits after ${targetHead.slice(0, 8)} have been reset`]
+      : [`Rollback did not execute: ${rollbackResult.reason}`],
+    nextActions: rollbackResult.rolled
+      ? ['Run `git log --oneline -10` to verify', 'Run `implement run` to start fresh']
+      : ['Check git status manually'],
   };
+}
+
+/**
+ * 执行 git rollback：git reset --hard 到指定 commit。
+ * 不是 git 仓库或目标 commit 不存在时静默跳过。
+ */
+async function doGitRollback(cwd, targetHead) {
+  try {
+    await execAsync('git rev-parse --is-inside-work-tree', { cwd });
+  } catch {
+    return { rolled: false, reason: 'Not a git repository' };
+  }
+  try {
+    // 验证目标 commit 存在
+    await execAsync(`git rev-parse --verify ${targetHead}`, { cwd });
+  } catch {
+    return { rolled: false, reason: `Commit ${targetHead} does not exist` };
+  }
+  try {
+    await execAsync(`git reset --hard ${targetHead}`, { cwd });
+    return { rolled: true, target: targetHead };
+  } catch (err) {
+    return { rolled: false, reason: err.message };
+  }
 }
 
 /**
@@ -1496,12 +1897,13 @@ module.exports = {
   implement: implementTask,
   implementBatch,
   implementStatus,
-  // Phase 驱动编排 entry-points
+  // Phase 驱动编排 entry-points（含断点恢复）
   run: runPhases,
   runPhases,
   resume,
   checkpoint,
   abort,
+  rollback,
   // AST 增强函数
   analyzeCodeWithAST,
   safeAddImport,
@@ -1518,4 +1920,14 @@ module.exports = {
   getGitStatus,
   getGitHead,
   generateCodeForTask,
+  // 断点恢复辅助函数
+  hashContent,
+  computeProgress,
+  createInitialState,
+  ensureStateFields,
+  recordTaskFailure,
+  recordCheckpointFailure,
+  clearTaskFailure,
+  validateStateForResume,
+  doGitRollback,
 };
