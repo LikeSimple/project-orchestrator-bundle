@@ -430,6 +430,20 @@ ${content}
     } catch {
       // LLM 失败时静默回退到模板
     }
+
+    // 结构化 LLM 增强：使用 generateDocument 生成配套 README
+    const docResult = await llm.generateDocument({
+      type: 'readme',
+      projectName: projectName || 'NewProject',
+      description: description.slice(0, 500),
+      techStack: [],
+      features: stories.map(s => s.title || s.id),
+      additionalContext: content.slice(0, 2000),
+    });
+    if (docResult.ok && docResult.document) {
+      const readmePath = path.join(path.dirname(specPath), 'README.md');
+      await writeFileSafe(readmePath, docResult.document);
+    }
   }
 
   await writeFileSafe(specPath, content);

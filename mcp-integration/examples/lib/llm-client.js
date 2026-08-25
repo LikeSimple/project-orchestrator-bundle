@@ -1002,6 +1002,103 @@ Output JSON:`;
 }
 
 // ============================================================
+// 便捷方法：错误分析
+// ============================================================
+
+async function analyzeError({
+  error = '',
+  stackTrace = '',
+  codeContext = '',
+  filePath = '',
+  language = 'javascript',
+  logContext = '',
+} = {}) {
+  const system = `You are a senior debug engineer specializing in root cause analysis of software errors.
+
+Analyze the error, stack trace, and code context to determine root cause and provide fix suggestions.
+
+Output format (JSON):
+{
+  "rootCause": "one-line description of the root cause",
+  "errorType": "TypeError|ReferenceError|SyntaxError|RuntimeError|LogicError|Other",
+  "severity": "critical|high|medium|low",
+  "category": "null-reference|type-mismatch|missing-import|async-issue|boundary|security|config|other",
+  "fixSteps": [
+    {"step": 1, "action": "specific fix action", "code": "code snippet if applicable"}
+  ],
+  "prevention": ["how to prevent this class of error"],
+  "confidence": 0.0-1.0,
+  "summary": "one-line diagnosis"
+}`;
+
+  let userMsg = `Analyze this error:
+
+## Error
+\`\`\`
+${error.slice(0, 1000)}
+\`\`\`
+
+## Stack Trace
+\`\`\`
+${(stackTrace || '(none provided)').slice(0, 2000)}
+\`\`\`
+
+## File
+${filePath || '(unnamed)'} (${language})`;
+
+  if (codeContext) {
+    userMsg += `
+
+## Code Context
+\`\`\`${language}
+${codeContext.slice(0, 3000)}
+\`\`\``;
+  }
+
+  if (logContext) {
+    userMsg += `
+
+## Log Context
+\`\`\`
+${logContext.slice(0, 2000)}
+\`\`\``;
+  }
+
+  userMsg += `
+
+Output JSON:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 2048,
+  });
+
+  if (!result.ok) return result;
+
+  let analysis;
+  try {
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    analysis = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
+  } catch {
+    analysis = {
+      rootCause: 'Failed to parse LLM response',
+      errorType: 'Unknown',
+      severity: 'medium',
+      category: 'other',
+      fixSteps: [],
+      prevention: [],
+      confidence: 0,
+      summary: 'LLM analysis failed to parse',
+      raw: result.content,
+    };
+  }
+
+  return { ...result, analysis };
+}
+
+// ============================================================
 // 工具：检查是否有可用的 LLM
 // ============================================================
 
@@ -1030,6 +1127,7 @@ module.exports = {
   analyzeDependencyRisk,
   generateDocument,
   analyzeEnvSecurity,
+  analyzeError,
   isAvailable,
   getProviderName,
   detectProvider,

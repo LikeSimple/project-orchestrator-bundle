@@ -1020,63 +1020,32 @@ async function run({ projectRoot, framework, scope = 'all', watch = false, failO
     }
   }
 
-  // 8. LLM 失败分析
+  // 8. LLM 失败分析（结构化方法 analyzeError）
   let failureAnalysis = null;
   if (execResult.exitCode !== 0 && llm.isAvailable()) {
     try {
-      const analysisResult = await llm.callLLM({
-        system: `你是一个资深测试工程师。分析测试失败的原因，并给出具体的修复建议。
-
-输出格式要求（JSON）：
-{
-  "rootCause": "根本原因简述",
-  "failedTests": [
-    {"testName": "测试名称", "error": "错误信息摘要", "cause": "失败原因分析", "category": "logic-error|type-error|integration-error|performance-issue|missing-dependency|unknown"}
-  ],
-  "fixSuggestions": [
-    {"priority": "high|medium|low", "description": "修复建议描述", "action": "具体操作步骤"}
-  ],
-  "summary": "一句话总结"
-}`,
-        messages: [{
-          role: 'user',
-          content: `测试执行失败，请分析失败原因并给出修复建议。
-
-## 测试框架
-${detectedInfo.framework}
-
-## 测试命令
-${cmd}
-
-## 测试输出（stdout）
-\`\`\`
-${execResult.stdout.slice(-4000)}
-\`\`\`
-
-## 错误输出（stderr）
-\`\`\`
-${execResult.stderr.slice(-4000)}
-\`\`\`
-
-## 失败统计
-通过: ${passed}, 失败: ${failed}, 跳过: ${skipped}, 总计: ${total}
-
-请以 JSON 格式输出分析结果：`,
-        }],
-        temperature: 0.2,
-        maxTokens: 4096,
+      const errorOutput = execResult.stderr.slice(-2000) || execResult.stdout.slice(-2000);
+      const result = await llm.analyzeError({
+        error: `Test failure in ${detectedInfo.framework}: ${failed}/${total} tests failed\n${errorOutput.slice(0, 1000)}`,
+        codeContext: execResult.stdout.slice(-3000),
+        language: 'javascript',
+        logContext: errorOutput,
       });
-
-      if (analysisResult.ok) {
-        try {
-          const jsonMatch = analysisResult.content.match(/\{[\s\S]*\}/);
-          failureAnalysis = JSON.parse(jsonMatch ? jsonMatch[0] : analysisResult.content);
-        } catch {
-          failureAnalysis = {
-            summary: 'Failed to parse LLM analysis as JSON',
-            raw: analysisResult.content.slice(0, 1000),
-          };
-        }
+      if (result.ok && result.analysis) {
+        const a = result.analysis;
+        failureAnalysis = {
+          rootCause: a.rootCause || '',
+          errorType: a.errorType || 'Unknown',
+          severity: a.severity || 'medium',
+          category: a.category || 'other',
+          fixSuggestions: Array.isArray(a.fixSteps)
+            ? a.fixSteps.map(f => typeof f === 'string' ? f : (f.action || ''))
+            : [],
+          prevention: Array.isArray(a.prevention) ? a.prevention : [],
+          confidence: a.confidence || 0.5,
+          summary: a.summary || '',
+          provider: result.provider,
+        };
       }
     } catch {
       // 静默回退
@@ -2099,54 +2068,18 @@ async function contract({ projectRoot, fromFiles }) {
     }
   }
 
-  // LLM 契约一致性分析
+  // LLM 契约一致性分析（结构化方法 reviewCode）
   let llmFindings = null;
   if (llm.isAvailable() && fileContents.length > 0) {
     try {
-      const allContent = fileContents
-        .map(({ file, content }) => `## 文件: ${file}\n\`\`\`json\n${content.slice(0, 6000)}\n\`\`\``)
-        .join('\n\n');
-
-      const analysisResult = await llm.callLLM({
-        system: `你是一个资深 API 契约审查工程师。分析 OpenAPI/REST 契约文件的一致性和质量。
-
-输出格式要求（JSON）：
-{
-  "consistencyScore": 0-100,
-  "findings": [
-    {"severity": "critical|major|minor|info", "category": "consistency|security|completeness|documentation", "file": "文件名", "description": "问题描述", "suggestion": "改进建议"}
-  ],
-  "summary": "一句话总结"
-}
-
-重点检查：
-- 多个契约文件之间的一致性（相同模型定义是否一致）
-- 请求/响应结构的完整性
-- 错误处理定义
-- 安全相关定义（认证、权限）
-- 文档完整性`,
-        messages: [{
-          role: 'user',
-          content: `请分析以下契约文件的一致性和质量：
-
-${allContent}
-
-请以 JSON 格式输出分析结果：`,
-        }],
-        temperature: 0.1,
-        maxTokens: 4096,
+      const allContent = fileContents.map(({ content }) => content).join('\n\n');
+      const reviewResult = await llm.reviewCode({
+        code: allContent.slice(0, 6000),
+        language: 'json',
+        checklist: ['consistency', 'security', 'completeness', 'documentation', 'error handling'],
       });
-
-      if (analysisResult.ok) {
-        try {
-          const jsonMatch = analysisResult.content.match(/\{[\s\S]*\}/);
-          llmFindings = JSON.parse(jsonMatch ? jsonMatch[0] : analysisResult.content);
-        } catch {
-          llmFindings = {
-            summary: 'Failed to parse LLM contract analysis as JSON',
-            raw: analysisResult.content,
-          };
-        }
+      if (reviewResult.ok && reviewResult.review) {
+        llmFindings = reviewResult.review;
       }
     } catch {
       // 静默回退：LLM 分析失败不影响主流程

@@ -4422,6 +4422,19 @@ async function run(params) {
             try {
               await fs.writeFile(filePath, llmResult.code, 'utf-8');
               llmEnhanced = true;
+
+              // 结构化 LLM 增强：使用 reviewCode 验证生成代码质量
+              const reviewResult = await llm.reviewCode({
+                code: llmResult.code.slice(0, 3000),
+                language,
+                checklist: ['error handling', 'type safety', 'code structure', 'best practices'],
+              });
+              if (reviewResult.ok && reviewResult.review && reviewResult.review.issues) {
+                const criticalIssues = reviewResult.review.issues.filter(i => i.severity === 'critical' || i.severity === 'major');
+                if (criticalIssues.length > 0) {
+                  llmWarnings.push(`${relPath}: ${criticalIssues.length} quality issues found by LLM review`);
+                }
+              }
             } catch {
               llmWarnings.push(`Failed to write enhanced ${relPath}`);
             }

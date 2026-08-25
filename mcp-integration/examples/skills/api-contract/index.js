@@ -206,6 +206,7 @@ async function generate({ projectRoot, fromFiles, outputPath, authType, useLLM =
 
   // ---- LLM 增强：用业务描述生成更完整的 OpenAPI ----
   let openapiYaml = null;
+  let contractReview = null;
 
   if (useLLM && llm.isAvailable()) {
     try {
@@ -248,6 +249,16 @@ ${auth}
           openapiYaml = yamlContent;
           llmEnhanced = true;
           llmProvider = result.provider;
+
+          // 结构化 LLM 增强：使用 reviewCode 审查契约质量
+          const reviewResult = await llm.reviewCode({
+            code: yamlContent.slice(0, 3000),
+            language: 'yaml',
+            checklist: ['API completeness', 'response schema', 'error handling', 'security'],
+          });
+          if (reviewResult.ok && reviewResult.review && reviewResult.review.issues) {
+            contractReview = reviewResult.review;
+          }
         }
       }
     } catch {

@@ -537,6 +537,8 @@ async function convert({ htmlFile, framework = 'react', target, typescript = tru
     let subComponents = heuristicSubComponents;
     let llmEnhanced = false;
     let llmProvider = null;
+    let codeReview = null;
+    const llmWarnings = [];
 
     const llmResult = await convertWithLLM(htmlContent, targetFramework, componentName, typescript);
     if (llmResult) {
@@ -547,6 +549,22 @@ async function convert({ htmlFile, framework = 'react', target, typescript = tru
       const splitResult = await splitWithLLM(htmlContent, targetFramework);
       if (splitResult) {
         subComponents = splitResult.components;
+      }
+
+      // 结构化代码审查：验证生成的组件代码质量
+      const reviewResult = await llm.reviewCode({
+        code: componentContent.slice(0, 3000),
+        language: targetFramework === 'vue3' ? 'vue' : (typescript ? 'typescript' : 'javascript'),
+        checklist: ['error handling', 'type safety', 'component structure', 'accessibility', 'best practices'],
+      });
+      if (reviewResult.ok && reviewResult.review && reviewResult.review.issues) {
+        codeReview = reviewResult.review;
+        const criticalIssues = reviewResult.review.issues.filter(
+          i => i.severity === 'critical' || i.severity === 'major'
+        );
+        if (criticalIssues.length > 0) {
+          llmWarnings.push(`LLM review found ${criticalIssues.length} critical/major issue(s) in generated component`);
+        }
       }
     }
 
@@ -640,15 +658,17 @@ export default ${sc.name};
         files: allFiles,
         llmEnhanced,
         llmProvider: llmEnhanced ? llmProvider : null,
+        codeReview,
         parser: 'parse5+csstree+recast',
       },
       warnings: llmEnhanced
-        ? []
+        ? llmWarnings
         : ['LLM not available, using AST-driven heuristic conversion'],
       nextActions: [
         `Review ${componentName}.${ext}`,
         subComponents.length > 0 ? `Review ${subComponents.length} sub-components` : null,
         typeFile ? 'Review generated types' : null,
+        codeReview ? 'Address code review issues' : null,
         'Run linter to fix formatting',
       ].filter(Boolean),
     };

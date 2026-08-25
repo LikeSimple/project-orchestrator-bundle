@@ -447,15 +447,58 @@ async function delta({ slug, projectRoot }) {
     // AST 分析失败，静默回退，不影响现有功能
   }
 
-  // LLM 增强：智能分析 proposal 生成更准确的 SPEC delta
+  // 结构化代码模式分析：使用 analyzeCodePatterns 检测受影响文件中的设计模式
+  let codePatternAnalysis = null;
+  if (astAnalysis && astAnalysis.fileImpacts && astAnalysis.fileImpacts.length > 0 && llm.isAvailable()) {
+    try {
+      const topFiles = astAnalysis.fileImpacts.slice(0, 3);
+      const patternResults = [];
+      for (const fi of topFiles) {
+        const absPath = path.join(cwd, fi.file);
+        try {
+          const code = await fs.readFile(absPath, 'utf-8');
+          const result = await llm.analyzeCodePatterns({
+            code: code.slice(0, 4000),
+            filePath: fi.file,
+            framework: '',
+          });
+          if (result.ok && result.analysis) {
+            patternResults.push({
+              file: fi.file,
+              detected: result.analysis.detected || [],
+              suggested: result.analysis.suggested || [],
+              summary: result.analysis.summary || '',
+            });
+          }
+        } catch { /* skip unreadable files */ }
+      }
+      if (patternResults.length > 0) {
+        codePatternAnalysis = {
+          filesAnalyzed: patternResults.length,
+          results: patternResults,
+        };
+      }
+    } catch {
+      // 静默回退
+    }
+  }
+
+  // LLM 增强：基于 AST + 代码模式分析结果生成更准确的 SPEC delta
   let llmEnhanced = false;
   let llmAnalysis = null;
   if (llm.isAvailable()) {
     try {
+      const patternContext = codePatternAnalysis
+        ? `\n## 代码模式分析结果（AST 预检测）\n${codePatternAnalysis.results.map(r => `### ${r.file}\n检测到的模式: ${r.detected.map(d => d.pattern).join(', ') || '无'}\n建议的模式: ${r.suggested.map(s => `${s.pattern}(${s.priority})`).join(', ') || '无'}\n${r.summary}`).join('\n\n')}`
+        : '';
+      const astContext = astAnalysis
+        ? `\n## AST 代码影响分析\n扫描文件: ${astAnalysis.filesScanned}, 受影响文件: ${astAnalysis.affectedFiles}, 受影响函数: ${astAnalysis.impactSummary.functionCount}, 导出API: ${astAnalysis.impactSummary.exportCount}, breakingChange风险: ${astAnalysis.impactSummary.breakingChangeRisk}`
+        : '';
+
       const result = await llm.callLLM({
         system: `你是一位资深的软件需求分析师，擅长从变更提案中提取结构化的规格变更信息。
 
-任务：分析用户提供的 Change Proposal，输出结构化的 SPEC delta 分析结果。
+任务：分析用户提供的 Change Proposal，结合 AST 代码影响分析和代码模式分析，输出结构化的 SPEC delta 分析结果。
 
 输出要求（严格 JSON 格式，不要 markdown 代码块）：
 {
@@ -481,17 +524,21 @@ async function delta({ slug, projectRoot }) {
 
 要求：
 1. 仔细阅读 proposal 内容，准确识别新增、修改、删除的需求
-2. 如果某类变更为空，返回空数组 []
-3. keywords 提取 3-8 个最核心的需求关键词
-4. affectedModules 识别受影响的系统模块（如 auth、user、order、payment 等）
-5. impactScope 评估变更影响范围
-6. 只输出 JSON，不要任何额外解释或 markdown 标记`,
+2. 结合 AST 代码影响分析结果，更准确地识别受影响的模块和 API
+3. 结合代码模式分析结果，确保变更建议与现有代码架构一致
+4. 如果某类变更为空，返回空数组 []
+5. keywords 提取 3-8 个最核心的需求关键词
+6. affectedModules 识别受影响的系统模块（如 auth、user、order、payment 等）
+7. impactScope 评估变更影响范围
+8. 只输出 JSON，不要任何额外解释或 markdown 标记`,
         messages: [{ role: 'user', content: `请分析以下 Change Proposal 并输出 SPEC delta 分析结果：
 
 ## Change Proposal
 ${proposalContent}
 
 ${specFile ? `## Baseline Spec 文件位置：${specFile}` : '## 注意：当前项目没有找到现有的 spec.md（全新项目）'}
+${astContext}
+${patternContext}
 
 请输出 JSON 格式的分析结果。` }],
         temperature: 0.3,
@@ -541,6 +588,7 @@ ${specFile ? `## Baseline Spec 文件位置：${specFile}` : '## 注意：当前
 
   const summaryParts = ['SPEC delta generated'];
   if (astEnhanced) summaryParts.push('AST enhanced');
+  if (codePatternAnalysis) summaryParts.push('pattern analyzed');
   if (llmEnhanced) summaryParts.push('LLM enhanced');
 
   return {
@@ -552,6 +600,7 @@ ${specFile ? `## Baseline Spec 文件位置：${specFile}` : '## 注意：当前
       keywordsExtracted: llmEnhanced && llmAnalysis ? llmAnalysis.keywords || [] : keywords,
       astAnalysis,
       astEnhanced,
+      codePatternAnalysis,
       llmEnhanced,
       llmProvider: llmEnhanced ? llm.getProviderName() : null,
       affectedModules: llmAnalysis?.affectedModules || [],

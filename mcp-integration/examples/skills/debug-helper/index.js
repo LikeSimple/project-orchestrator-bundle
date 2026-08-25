@@ -302,75 +302,36 @@ async function analyze({ errorMessage, stackTrace, logFile, context, projectRoot
     // AST 分析失败，静默回退，不影响现有功能
   }
 
-  // 6. LLM 深度分析（如果可用）
+  // 6. LLM 深度分析（结构化方法 analyzeError）
   let llmAnalysis = null;
   let llmEnhanced = false;
 
   if (llm.isAvailable()) {
     try {
       const logContextStr = logCtx
-        ? `最近错误日志 (${logCtx.recentErrors.length} 条):\n${logCtx.recentErrors.join('\n')}`
-        : '无';
+        ? logCtx.recentErrors.join('\n')
+        : '';
 
-      const contextStr = context ? `相关上下文/代码片段:\n${context}` : '无';
-
-      const systemPrompt = `你是资深调试专家，擅长根因分析和修复方案制定。
-请基于给定的错误信息、堆栈跟踪、日志上下文和相关代码，进行深度分析并输出结构化结果。
-
-输出要求（严格以 JSON 格式返回，不要 markdown 标记）：
-{
-  "rootCause": "根因分析 - 深入解释错误的根本原因，不止于表面现象",
-  "fixSteps": ["步骤1", "步骤2", "步骤3"],
-  "prevention": "预防建议 - 如何避免类似问题再次发生",
-  "confidence": 0.0-1.0 之间的数字，表示分析的置信度,
-  "suggestedCode": "可选的修复代码示例，如果适用的话"
-}`;
-
-      const userMessage = `错误信息: ${errorMessage}
-
-堆栈跟踪:
-${stackTrace || '(无)'}
-
-日志上下文:
-${logContextStr}
-
-${contextStr}
-
-错误分类（启发式）: ${classification.category} (severity: ${classification.severity})
-启发式根因: ${rootCause}
-
-请进行深度根因分析并给出完整修复方案。`;
-
-      const result = await llm.callLLM({
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
-        temperature: 0.2,
-        maxTokens: 2048,
+      const result = await llm.analyzeError({
+        error: errorMessage,
+        stackTrace: stackTrace || '',
+        codeContext: context || '',
+        language: 'javascript',
+        logContext: logContextStr,
       });
 
-      if (result.ok) {
-        // 尝试解析 JSON 输出
-        let parsed = null;
-        try {
-          const jsonMatch = result.content.match(/\{[\s\S]*\}/);
-          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
-        } catch {
-          // 解析失败，将整个内容作为 rootCause
-          parsed = {
-            rootCause: result.content,
-            fixSteps: [],
-            prevention: '',
-            confidence: 0.5,
-            suggestedCode: '',
-          };
-        }
-
+      if (result.ok && result.analysis) {
+        const a = result.analysis;
         llmAnalysis = {
-          rootCause: parsed.rootCause || '',
-          fixSteps: Array.isArray(parsed.fixSteps) ? parsed.fixSteps : [],
-          prevention: parsed.prevention || '',
-          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-          suggestedCode: parsed.suggestedCode || '',
+          rootCause: a.rootCause || '',
+          errorType: a.errorType || 'Unknown',
+          category: a.category || 'other',
+          fixSteps: Array.isArray(a.fixSteps)
+            ? a.fixSteps.map(f => typeof f === 'string' ? f : (f.action || ''))
+            : [],
+          prevention: Array.isArray(a.prevention) ? a.prevention.join('; ') : (a.prevention || ''),
+          confidence: typeof a.confidence === 'number' ? a.confidence : 0.5,
+          summary: a.summary || '',
           provider: result.provider,
           model: result.model,
         };
@@ -598,15 +559,25 @@ async function trace({ errorMessage, stackTrace, projectRoot }) {
 
   if (llm.isAvailable() && frames.length > 0) {
     try {
-      const result = await llm.callLLM({
-        system: '你是调用链分析专家。分析 stack trace 中的调用路径，找出关键节点和可能的 bug 位置。',
-        messages: [{ role: 'user', content: `Stack trace frames:\n${JSON.stringify(frames, null, 2)}\n\nError: ${errorMessage || ''}\n\n输出 JSON: {"entryPoint": "...", "crashPoint": "...", "callChain": [...], "suspectedBug": "..."}` }],
-        temperature: 0.2,
-        maxTokens: 1024,
+      const stackStr = frames.map(f => `  at ${f.function} (${f.file}:${f.line}:${f.column || 0})`).join('\n');
+      const result = await llm.analyzeError({
+        error: errorMessage || 'Runtime error in call chain',
+        stackTrace: stackStr,
+        language: 'javascript',
       });
-      if (result.ok) {
-        const m = result.content.match(/\{[\s\S]*\}/);
-        analysis = m ? JSON.parse(m[0]) : { callChain: frames };
+      if (result.ok && result.analysis) {
+        const a = result.analysis;
+        analysis = {
+          rootCause: a.rootCause || '',
+          errorType: a.errorType || 'Unknown',
+          category: a.category || 'other',
+          callChain: frames.map(f => `${f.function} (${f.file}:${f.line})`),
+          suspectedBug: a.summary || '',
+          fixSteps: Array.isArray(a.fixSteps)
+            ? a.fixSteps.map(f => typeof f === 'string' ? f : (f.action || ''))
+            : [],
+          confidence: a.confidence || 0.5,
+        };
         llmEnhanced = true;
         llmProvider = llm.getProviderName();
       }
@@ -666,24 +637,27 @@ async function logs({ logFile, lines: maxLines, level, projectRoot }) {
 
   let llmEnhanced = false;
   let llmProvider = null;
+  let logAnalysis = null;
   let summary = `${filtered.length} log lines (${errorLines.length} errors, ${warnLines.length} warnings)`;
 
   if (llm.isAvailable() && errorLines.length > 0) {
     try {
-      const result = await llm.callLLM({
-        system: '你是日志分析专家。从日志中提取关键错误模式和关联信息。',
-        messages: [{ role: 'user', content: `Log file: ${logFile}\n\nError lines:\n${errorLines.slice(0, 30).join('\n')}\n\n输出 JSON: {"rootCause": "...", "pattern": "...", "relatedErrors": [...]}` }],
-        temperature: 0.2,
-        maxTokens: 1024,
+      const result = await llm.analyzeError({
+        error: errorLines.slice(0, 10).join('\n'),
+        logContext: errorLines.slice(0, 30).join('\n'),
+        language: 'javascript',
       });
-      if (result.ok) {
-        const m = result.content.match(/\{[\s\S]*\}/);
-        if (m) {
-          const parsed = JSON.parse(m[0]);
-          summary += ` | LLM: ${parsed.rootCause || parsed.pattern}`;
-          llmEnhanced = true;
-          llmProvider = llm.getProviderName();
-        }
+      if (result.ok && result.analysis) {
+        const a = result.analysis;
+        logAnalysis = {
+          rootCause: a.rootCause || '',
+          errorType: a.errorType || 'Unknown',
+          category: a.category || 'other',
+          confidence: a.confidence || 0.5,
+        };
+        summary += ` | LLM: ${a.rootCause || a.summary || ''}`;
+        llmEnhanced = true;
+        llmProvider = llm.getProviderName();
       }
     } catch { /* graceful */ }
   }
@@ -699,6 +673,7 @@ async function logs({ logFile, lines: maxLines, level, projectRoot }) {
       shownLines: filtered.length,
       errorLines: errorLines.slice(0, 20),
       warnLines: warnLines.slice(0, 10),
+      logAnalysis,
       llmEnhanced,
       llmProvider,
     },

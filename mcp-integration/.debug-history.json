@@ -419,6 +419,30 @@
       "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787669981828-2qq3xh\\app.log",
       "errorCount": 2,
       "timestamp": "2026-08-25T14:59:41.835Z"
+    },
+    {
+      "type": "trace",
+      "errorMessage": "",
+      "frameCount": 3,
+      "timestamp": "2026-08-25T15:33:57.916Z"
+    },
+    {
+      "type": "logs",
+      "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787672037919-5ia10q\\app.log",
+      "errorCount": 2,
+      "timestamp": "2026-08-25T15:33:57.926Z"
+    },
+    {
+      "type": "trace",
+      "errorMessage": "",
+      "frameCount": 3,
+      "timestamp": "2026-08-25T15:54:05.349Z"
+    },
+    {
+      "type": "logs",
+      "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787673245354-vxp7kb\\app.log",
+      "errorCount": 2,
+      "timestamp": "2026-08-25T15:54:05.361Z"
     }
   ]
 }
