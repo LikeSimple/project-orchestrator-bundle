@@ -2,7 +2,7 @@
 
 > AI Agent 协作编排场景下的项目全生命周期管理 Skill Bundle — 15 个子 Skill，覆盖从需求到发布的完整链路。
 
-[![CI](https://github.com/project-orchestrator/bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/project-orchestrator/bundle/actions/workflows/ci.yml)
+[![CI](https://github.com/LikeSimple/project-orchestrator-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/LikeSimple/project-orchestrator-bundle/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-blue)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
@@ -39,19 +39,42 @@
 
 ## 快速开始
 
-### 安装 Bundle
+### 选择 Bundle
+
+`bundles/` 目录下提供 4 套预置 Bundle 清单（YAML），按角色选择即可：
+
+| Bundle | 文件 | Skill 数 | 适合角色 |
+|---|---|---|---|
+| 完整 | `full-stack.yaml` | 15 | 全栈开发者 / 架构师（推荐） |
+| 前端 | `frontend-only.yaml` | 子集 | 前端开发者 |
+| API | `api-only.yaml` | 子集 | 后端 / API 开发者 |
+| 设计 | `design-only.yaml` | 子集 | 产品经理 / 设计师 |
+
+Bundle 清单是 YAML 描述文件，记录该 Bundle 包含哪些 Skill 及其角色。在 MCP 客户端（如 TRAE / Claude Code / Cursor）中注册 Bundle 时引用对应清单即可。详见下方[在 MCP 客户端中使用](#在-mcp-客户端中使用)。
+
+### 在 MCP 客户端中使用
+
+#### 前置：注册 MCP Server
+
+将 `mcp-integration/mcp.json` 中的 MCP Server 配置注册到你的 MCP 客户端（TRAE / Claude Code / Cursor）。配置后，15 个子 Skill 会作为 MCP Tool 暴露，Agent 可自动调用。
+
+TRAE 用户可直接使用 `mcp-integration/.trae.mcp.json`；其他客户端参考 `mcp.json` 中的 `command` / `args` / `env` 字段适配。
+
+#### 一键启动（可选）
 
 ```bash
-# 完整 Bundle（全栈开发者，推荐）
-bundle install full-stack
+# Windows
+cd mcp-integration && .\quickstart.ps1
 
-# 按角色安装子集
-bundle install frontend-only    # 前端开发者
-bundle install api-only         # 后端 / API 开发者
-bundle install design-only      # 产品经理 / 设计师
+# macOS / Linux
+cd mcp-integration && ./quickstart.sh
 ```
 
-### 在 Claude Code / Cursor 中使用
+脚本会自动执行 `npm install` → `npm run build` → `npm start`，启动 MCP Server。
+
+#### Slash 命令用法
+
+注册完成后，在 Claude Code / Cursor 中使用 slash 命令：
 
 ```bash
 # 项目初始化（完整 Bootstrap 流程）
@@ -90,6 +113,9 @@ node dist/skill-cli.cjs git-workflow conflict --input '{"strategy":"manual"}'
 project-orchestrator-bundle/
 ├── SKILL.md                               # 主编排入口（15 Skill 概览）
 ├── README.md                              # 本文件
+├── maturity-analysis-report.md            # 成熟度分析报告（v8）
+├── .env.example                           # 环境变量模板
+├── package.json                           # workspace 根配置
 ├── bundles/                               # Bundle 清单
 │   ├── full-stack.yaml                    # 完整 Bundle（15 Skill）
 │   ├── frontend-only.yaml                 # 前端 Bundle
@@ -114,37 +140,43 @@ project-orchestrator-bundle/
 ├── mcp-integration/                       # 实现 + MCP 集成
 │   ├── package.json                       # 构建脚本 + 依赖
 │   ├── tsconfig.json                      # TypeScript 配置
-│   ├── scripts/
-│   │   └── postbuild.js                   # 构建后资产复制
-│   ├── examples/
-│   │   ├── lib/
-│   │   │   └── llm-client.js             # 共享 LLM 客户端（6 Provider）
-│   │   ├── skills/                        # 15 个子 Skill 实现
-│   │   │   ├── api-contract/index.js
-│   │   │   ├── code-patterns/index.js
-│   │   │   ├── debug-helper/index.js
-│   │   │   ├── dependency-auditor/index.js
-│   │   │   ├── environment-manager/index.js
-│   │   │   ├── git-workflow/index.js
-│   │   │   ├── html-converter/index.js
-│   │   │   ├── implement-executor/index.js
-│   │   │   ├── openspec-workflow/index.js
-│   │   │   ├── review-checklist/index.js
-│   │   │   ├── scaffold-runner/index.js
-│   │   │   ├── spec-bootstrap/index.js
-│   │   │   ├── spec-userstory-to-design/index.js
-│   │   │   ├── test-runner/index.js
-│   │   │   └── ui-design/index.js
-│   │   └── orchestrator-tools.ts         # MCP Tool 编排层
-│   └── dist/                              # 构建产物
+│   ├── mcp.json                           # MCP Server 配置
+│   ├── .trae.mcp.json                     # TRAE MCP 配置
+│   ├── quickstart.ps1                     # Windows 一键启动脚本
+│   ├── quickstart.sh                      # macOS/Linux 一键启动脚本
+│   ├── src/                               # 源码
+│   │   ├── orchestrator-tools.ts          # MCP Tool 编排层（TypeScript）
+│   │   └── skill-cli.cjs                  # 命令行入口（CommonJS）
+│   ├── examples/                          # 源实现 + 示例
+│   │   ├── lib/                           # 共享库
+│   │   │   ├── llm-client.js             # 共享 LLM 客户端（6 Provider）
+│   │   │   ├── ast-parser.js             # AST 解析器（parse5 + csstree + recast）
+│   │   │   └── benchmark.js              # 性能基准测试
+│   │   └── skills/                        # 15 个子 Skill 实现
+│   │       ├── api-contract/index.js
+│   │       ├── code-patterns/index.js
+│   │       ├── debug-helper/index.js
+│   │       ├── dependency-auditor/index.js
+│   │       ├── environment-manager/index.js
+│   │       ├── git-workflow/index.js
+│   │       ├── html-converter/index.js
+│   │       ├── implement-executor/index.js
+│   │       ├── openspec-workflow/index.js
+│   │       ├── review-checklist/index.js
+│   │       ├── scaffold-runner/index.js
+│   │       ├── spec-bootstrap/index.js
+│   │       ├── spec-userstory-to-design/index.js
+│   │       ├── test-runner/index.js
+│   │       └── ui-design/index.js
+│   ├── docs/                              # 文档
+│   │   └── benchmarks/baseline.json       # 性能基线数据
+│   └── dist/                              # 构建产物（npm run build 生成）
 │       ├── skill-cli.cjs                  # 命令行入口
-│       ├── orchestrator-tools.js          # MCP 入口
-│       ├── lib/                           # 共享库
+│       ├── orchestrator-tools.js         # MCP 入口
+│       ├── lib/                           # 构建后的共享库
 │       └── skills/                        # 构建后的 Skill
 └── docs/                                  # 维护文档
-    ├── ARCHITECTURE.md
-    ├── MAINTAINERS.md
-    └── DEPENDENCIES.md
+    └── env-setup.md                       # 环境配置指南
 ```
 
 ## 构建与开发
@@ -168,6 +200,26 @@ npm run clean
 npm start
 ```
 
+## 配置
+
+### 环境变量
+
+复制 `.env.example` 为 `.env` 并按需修改。LLM API Key 为**可选**——不配置时自动降级到模板生成模式（`data.llmEnhanced: false`）。
+
+| 变量 | 说明 | 必须？ |
+|---|---|---|
+| `NODE_ENV` | 运行环境（development / production） | ✅ |
+| `APP_PORT` | 应用端口 | ✅ |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API Key | ⚠️ 可选 |
+| `OPENAI_API_KEY` | OpenAI API Key | ⚠️ 可选 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | ⚠️ 可选 |
+| `DASHSCOPE_API_KEY` | 通义千问 API Key | ⚠️ 可选 |
+| `MOONSHOT_API_KEY` | 月之暗面 API Key | ⚠️ 可选 |
+| `LLM_API_KEY` + `LLM_BASE_URL` | 自定义 OpenAI 兼容端点 | ⚠️ 可选 |
+| `MCP_SAMPLING_ENABLED` | 设为 `1` 启用 MCP Sampling（首选，零配置） | ⚠️ 可选 |
+
+> 完整环境配置指南详见 [docs/env-setup.md](docs/env-setup.md)。
+
 ## 测试与质量
 
 ```bash
@@ -189,7 +241,7 @@ node tests/e2e-check.cjs
 
 ### 质量保障措施
 
-- **AST 解析 100% 覆盖**：15/15 个 Skill 全部使用 AST 解析（parse5 + csstree + recast），无正则表达式解析
+- **AST 解析 100% 覆盖**：15/15 个 Skill 全部使用 AST 解析（parse5 + csstree + recast + @babel/parser），无正则表达式解析
 - **测试断言加固**：30 个弱断言已升级为深度数据字段断言（检查 `data` 关键字段值，而非仅检查 `ok` 类型）
 - **Windows 兼容**：`spawnSync` + `shell: true` 替代 `execAsync`，修复 git-workflow / dependency-auditor / environment-manager 的 stdout pipe 问题
 - **E2E 链路验证**：12 步全流程测试覆盖 spec→scaffold→design→implement→test→git→review，验证 Skill 间数据传递正确性
@@ -267,6 +319,57 @@ await llm.reviewCode({ code, checklist, ... });
 - MCP Sampling 不可用 → 自动降级到直连 Provider
 - 无 API key → 自动回退到启发式规则 / 模板生成模式
 - 所有降级静默执行，返回 `data.llmEnhanced: false`，不影响核心功能
+
+## 架构概览
+
+```mermaid
+graph TB
+    subgraph 编排层
+        ORC["project-orchestrator<br/>薄编排层（不执行任务）"]
+    end
+
+    subgraph P1["Phase 1 · 项目初始化（7 Skill）"]
+        S1[spec-bootstrap]
+        S2[scaffold-runner]
+        S3[ui-design]
+        S4[spec-userstory-to-design]
+        S5[api-contract]
+        S6[openspec-workflow]
+        S7[html-converter]
+    end
+
+    subgraph P2["Phase 2 · 功能变更与实现（4 Skill）"]
+        S8[implement-executor]
+        S9[test-runner]
+        S10[code-patterns]
+        S11[git-workflow]
+    end
+
+    subgraph P3["Phase 3 · 质量保障（4 Skill）"]
+        S12[debug-helper]
+        S13[review-checklist]
+        S14[dependency-auditor]
+        S15[environment-manager]
+    end
+
+    ORC -->|分发| P1
+    ORC -->|分发| P2
+    ORC -->|分发| P3
+
+    subgraph 共享层
+        LLM["llm-client.js<br/>10 个结构化方法<br/>MCP Sampling 优先 + 6 Provider 降级"]
+        AST["ast-parser.js<br/>parse5 + csstree + recast + @babel/parser"]
+    end
+
+    P1 -.->|调用| LLM
+    P2 -.->|调用| LLM
+    P3 -.->|调用| LLM
+    P1 -.->|调用| AST
+    P2 -.->|调用| AST
+    P3 -.->|调用| AST
+```
+
+三层分析架构（每个 Skill 内部）：AST 预检测（精确事实）→ 代码模式分析（结构化识别）→ LLM 深度分析（上下文推理）。
 
 ## 核心工作流
 
@@ -356,7 +459,7 @@ skill-cli git-workflow conflict        # 冲突检测
 
 | Skill | 核心命令 | 关键能力 |
 |---|---|---|
-| **spec-bootstrap** | constitution, init, plan, tasks, constitution, research, data-model, spec-quality | 生成项目宪法、spec/plan/tasks 三件套 |
+| **spec-bootstrap** | constitution, init, plan, tasks, research, data-model, spec-quality | 生成项目宪法、spec/plan/tasks 三件套 |
 | **scaffold-runner** | run, list, inspect, custom, addDep, enhance | 17 个模板（React/Vue/Next/Nuxt/Express/Nest/Koa/Spring Boot/FastAPI/Go/Rust/Flutter/.NET/Django/vitest/ts-lib/node-cli） |
 | **ui-design** | generate, adjust, audit, beautify | 单文件 HTML 原型 + 聊天式调整 |
 | **spec-userstory-to-design** | generate, validate | User Story → 4 页面 + 11 章节 Page Detail + OpenAPI 3.1.2 + Mermaid 流程图 + 覆盖度校验 |
@@ -425,20 +528,25 @@ Bundle **不依赖 SpecKit 或 OpenSpec CLI 工具**。它借鉴了这两个工�
 
 ## 项目成熟度
 
-当前成熟度：**88%**（Beta 可用）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md)
+当前成熟度：**96%**（Phase 3 · Beta 后期，稳定）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md)
 
 | 维度 | 评分 |
 |---|---|
-| 设计文档完整度 | 92% |
-| 实际代码实现度 | 85% |
-| MCP 集成方案 | 96% |
+| 设计文档完整度 | 96% |
+| 实际代码实现度 | 93% |
+| MCP 集成方案 | 98% |
 | Bundle 配置 | 95% |
-| 架构设计合理性 | 92% |
+| 架构设计合理性 | 98% |
 
-### v5 已修复的关键问题
+### v8 已修复的关键问题
 
-- ✅ AST 解析 100% 覆盖（15/15 Skill 迁移到 parse5 + csstree + recast）
-- ✅ 端到端链路测试（12 步全流程验证）
+- ✅ LLM 全量深度集成（15/15 Skill 使用结构化 LLM 方法，0 个未结构化）
+- ✅ 三层分析架构落地（AST 预检测 → 代码模式分析 → LLM 深度分析）
+- ✅ llm-client.js 方法体系扩展到 10 个结构化方法（新增 `analyzeError`）
+- ✅ pipeline 断点恢复机制（resume / rollback / abort + 重试预算 + 状态验证）
+- ✅ 性能基线数据（benchmark.js + baseline.json，AST 解析 < 3ms）
+- ✅ AST 解析 100% 覆盖（15/15 Skill 迁移到 parse5 + csstree + recast + @babel/parser）
+- ✅ 端到端链路测试（12 步全流程验证 + AST 传播校验）
 - ✅ dependency-auditor 真实 npm audit（`npm audit --json` + CVE 解析）
 - ✅ environment-manager Doppler/Vault 集成（三后端 Secrets 管理）
 - ✅ 测试断言加固（30 个弱断言升级为深度数据字段断言）
@@ -451,4 +559,4 @@ MIT
 
 ## 贡献
 
-欢迎贡献！详见 `docs/MAINTAINERS.md`。
+欢迎贡献！请通过 GitHub Issue 提交问题或建议，或直接提交 Pull Request。

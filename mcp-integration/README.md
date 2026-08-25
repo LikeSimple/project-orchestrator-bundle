@@ -15,7 +15,7 @@
 - ✅ 跨平台兼容（Trae / Claude Code / Cursor / VS Code）
 - ✅ 跟随 MCP 2026-07-28 最新规范（无状态核心 + Streamable HTTP）
 - ✅ **MCP Sampling**：Skill 直接复用 Agent 框架的 LLM，零 API key 配置
-- ✅ **AST 解析 100% 覆盖**：15/15 Skill 使用 parse5 + csstree + recast（43 个 API）
+- ✅ **AST 解析 100% 覆盖**：15/15 Skill 使用 parse5 + csstree + recast + @babel/parser（43 个 API）
 - ✅ **端到端链路测试**：12 步全流程 spec→scaffold→design→implement→test→git→review
 - ✅ **真实 npm audit**：dependency-auditor 调用 `npm audit --json` 获取真实 CVE 数据
 - ✅ **Doppler/Vault 集成**：environment-manager 支持三后端 Secrets 管理
@@ -193,10 +193,10 @@
 
     "orchestrator-tools": {
       "command": "node",
-      "args": ["${workspaceFolder}/mcp-servers/orchestrator-tools/dist/index.js"],
+      "args": ["${workspaceFolder}/mcp-integration/dist/orchestrator-tools.js"],
       "env": {
         "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle",
+        "SKILL_BUNDLE_PATH": "${workspaceFolder}/mcp-integration",
         "START_MCP_TIMEOUT_MS": "120000"
       }
     }
@@ -229,10 +229,10 @@
     },
     "orchestrator-tools": {
       "command": "node",
-      "args": ["${workspaceFolder}/mcp-servers/orchestrator-tools/dist/index.js"],
+      "args": ["${workspaceFolder}/mcp-integration/dist/orchestrator-tools.js"],
       "env": {
         "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle"
+        "SKILL_BUNDLE_PATH": "${workspaceFolder}/mcp-integration"
       }
     }
   }
@@ -252,7 +252,7 @@
     },
     "orchestrator-tools": {
       "command": "node",
-      "args": ["${workspaceFolder}/mcp-servers/orchestrator-tools/dist/index.js"],
+      "args": ["${workspaceFolder}/mcp-integration/dist/orchestrator-tools.js"],
       "env": {
         "PROJECT_ROOT": "${workspaceFolder}"
       }
@@ -315,7 +315,7 @@ Windows 下 `npx` 需要 `cmd /c` 包装：
 ### 6.3 实现模板（TypeScript + @modelcontextprotocol/sdk）
 
 ```typescript
-// mcp-servers/orchestrator-tools/src/index.ts
+// mcp-integration/src/orchestrator-tools.ts
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -436,16 +436,22 @@ console.error('orchestrator-tools MCP server started');
 ### 6.4 部署步骤
 
 ```bash
-# 1. 创建 MCP Server 项目
-mkdir mcp-servers/orchestrator-tools
-cd mcp-servers/orchestrator-tools
-pnpm init
-pnpm add @modelcontextprotocol/sdk
+# 方式一：一键启动（推荐）
+# Windows
+.\quickstart.ps1
 
-# 2. 实现 server/src/index.ts（见上）
+# macOS / Linux
+./quickstart.sh
 
-# 3. 构建
-pnpm tsc
+# 方式二：手动步骤
+# 1. 进入 MCP 集成目录
+cd mcp-integration
+
+# 2. 安装依赖
+npm install
+
+# 3. 构建（TypeScript 编译 + 资产复制）
+npm run build
 
 # 4. 在 .trae/mcp.json 中注册（已包含在 §5.1）
 
@@ -722,7 +728,7 @@ cat > ~/.claude.json << 'EOF'
 {
   "mcpServers": {
     "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"] },
-    "orchestrator-tools": { "command": "node", "args": ["${workspaceFolder}/mcp-servers/orchestrator-tools/dist/index.js"] }
+    "orchestrator-tools": { "command": "node", "args": ["${workspaceFolder}/mcp-integration/dist/orchestrator-tools.js"] }
   }
 }
 EOF
@@ -824,4 +830,19 @@ EOF
   - 测试断言加固（30 个弱断言升级为深度数据字段断言）
   - Windows 兼容性（`spawnSync` + `shell: true` 修复 stdout pipe）
   - MCP Sampling 全链路（IPC 转发 + 延迟检测 + 三级降级）
+- v1.2.0 (2026-08-25) — v6 更新：
+  - AST 解析器补齐 @babel/parser（TypeScript 接口语法校验）
+  - 15/15 Skill 100% 迁移到 AST 解析，无正则表达式解析
+  - 文档全量同步 + CI/CD 流水线
+- v1.3.0 (2026-08-25) — v7 更新：
+  - LLM 深度集成 8/15 Skill（结构化 prompt + JSON 解析容错）
+  - llm-client.js 新增 6 个结构化方法（共 9 个：generateCode/reviewCode/generateCommitMessage/analyzeCodePatterns/analyzeSecurity/analyzeDependencyRisk/generateDocument/analyzeEnvSecurity + callLLM）
+  - "AST 预检测 → LLM 深度分析" 双层架构落地
+- v1.4.0 (2026-08-25) — v8 更新（当前）：
+  - **LLM 全量深度集成 15/15 Skill**，0 个未结构化（从 8/15 → 15/15）
+  - 新增 `analyzeError` 结构化方法（共 10 个），`customSystem` 参数支持定制 prompt
+  - **三层分析架构**落地（AST 预检测 → 代码模式分析 → LLM 深度分析）
+  - pipeline 断点恢复机制（resume / rollback / abort + 重试预算 + 状态验证）
+  - 性能基线数据（benchmark.js + baseline.json，AST 解析 < 3ms）
+  - 整体成熟度 96%（Phase 3 · Beta 后期稳定）
 - 由 `project-orchestrator-bundle / mcp-integration` 团队编写

@@ -15,7 +15,7 @@ description: |
  - debug-helper, review-checklist, dependency-auditor, environment-manager
 
  每个子 Skill 独立可调用，可独立上架 Marketplace。
- 支持 MCP Sampling（LLM 请求复用 Agent 框架 LLM）、AST 解析 100% 覆盖（parse5 + csstree + recast）、端到端链路测试（91 个测试）、真实 npm audit、Doppler/Vault 三后端 Secrets 管理。
+ 支持 MCP Sampling（LLM 请求复用 Agent 框架 LLM）、AST 解析 100% 覆盖（parse5 + csstree + recast + @babel/parser）、端到端链路测试（91 个测试）、真实 npm audit、Doppler/Vault 三后端 Secrets 管理。
 version: 1.1.0
 author: project-orchestrator authors
 license: MIT
@@ -84,10 +84,10 @@ binds:
 | **规范驱动** | 兼容 SpecKit 工作流设计（自研实现，不依赖 SpecKit CLI） |
 | **变更管理** | 兼容 OpenSpec 工作流设计（自研实现，不依赖 OpenSpec CLI） |
 | **设计产出** | UI 原型 + 聊天交互调整 + Page Flow + Page Detail |
-| **AST 解析** | 15/15 Skill 100% 使用 AST 解析（parse5 + csstree + recast，43 个 API） |
+| **AST 解析** | 15/15 Skill 100% 使用 AST 解析（parse5 + csstree + recast + @babel/parser，43 个 API） |
 | **测试质量** | 91 个测试 + E2E 全链路验证 + 30 个弱断言已加固 |
 | **安全审计** | 真实 npm audit（CVE 解析）+ 三后端 Secrets 管理（dotenv/Doppler/Vault） |
-| **成熟度** | 88%（Beta 可用）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md) |
+| **成熟度** | 96%（Phase 3 · Beta 后期稳定）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md) |
 | **契约优先** | OpenAPI 3.1.2 自动生成，贯穿设计与实现 |
 | **全链路** | 规范 → 设计 → 原型 → 代码 → 验证，覆盖项目全生命周期 |
 | **可复用** | 每个子 Skill 独立可发、可上架、可被其他项目引用 |
@@ -131,18 +131,23 @@ project-orchestrator-bundle/
 │   ├── review-checklist/SKILL.md
 │   ├── dependency-auditor/SKILL.md
 │   └── environment-manager/SKILL.md
-├── mcp-integration/              # MCP 集成方案（orchestrator-tools 等）
-│   ├── README.md
-│   ├── mcp.json
-│   └── orchestrator-tools.ts
+├── mcp-integration/              # MCP 集成 + 实现
+│   ├── README.md                 # MCP 集成说明
+│   ├── mcp.json                  # MCP Server 配置
+│   ├── .trae.mcp.json            # TRAE MCP 配置
+│   ├── quickstart.ps1            # Windows 一键启动
+│   ├── quickstart.sh             # macOS/Linux 一键启动
+│   ├── src/                      # 源码
+│   │   ├── orchestrator-tools.ts # MCP Tool 编排层
+│   │   └── skill-cli.cjs         # 命令行入口
+│   ├── examples/                 # 源实现 + 示例
+│   │   ├── lib/                  # 共享库（llm-client + ast-parser + benchmark）
+│   │   └── skills/               # 15 个子 Skill 实现
+│   ├── tests/                    # 集成测试（91 个测试）
+│   └── dist/                     # 构建产物（npm run build 生成）
 ├── docs/                         # 维护文档
-│   ├── ARCHITECTURE.md           # 架构设计
-│   ├── MAINTAINERS.md            # 维护指南
-│   ├── DEPENDENCIES.md           # 依赖管理
-│   └── env-setup.md              # 环境配置
-└── tests/                        # 集成测试
-    ├── e2e/full-flow.test.ts
-    └── unit/*.test.ts
+│   └── env-setup.md              # 环境配置指南
+└── maturity-analysis-report.md   # 成熟度分析报告（v8）
 ```
 
 ---
@@ -169,7 +174,7 @@ mkdir my-project && cd my-project
 /project-orchestrator.spec-bootstrap
 /project-orchestrator.scaffold-runner --stack=react-vite
 /project-orchestrator.ui-design --pages="登录,看板,周报"
-/project-orchestrator.design --from=spec.md
+/project-orchestrator.design --from=spec.md            # alias for spec-userstory-to-design
 /project-orchestrator.contract --from=plan.md
 ```
 
@@ -206,7 +211,7 @@ mkdir my-project && cd my-project
 
 ```bash
 # 把 UI Design 输出的 HTML 原型转为 Vue/React 组件
-/project-orchestrator.html-convert --from=prototype/index.html --target=react
+/project-orchestrator.html-converter --from=prototype/index.html --target=react
 ```
 
 ### 3.5 质量保障（Phase 3 · 按需调用）
@@ -599,7 +604,7 @@ Skill Bundle 的 LLM 调用采用 **MCP Sampling 优先 + 直连 Provider 降级
 
 ### 8.2 依赖锁定
 
-详见 `docs/DEPENDENCIES.md`：
+依赖如下：
 - node: >=18.0.0（唯一硬依赖）
 - @modelcontextprotocol/sdk: ^0.6.0（MCP 集成 + sampling）
 - parse5: ^7.1.2（HTML AST 解析，替代正则）
@@ -624,9 +629,9 @@ Skill Bundle 的 LLM 调用采用 **MCP Sampling 优先 + 直连 Provider 降级
 
 ## 九、相关文档
 
-- `docs/ARCHITECTURE.md` — 完整架构设计
-- `docs/MAINTAINERS.md` — 维护指南
-- `docs/DEPENDENCIES.md` — 依赖管理
+- [maturity-analysis-report.md](maturity-analysis-report.md) — 成熟度分析报告（v8）
+- [docs/env-setup.md](docs/env-setup.md) — 环境配置指南
+- [mcp-integration/README.md](mcp-integration/README.md) — MCP 集成说明
 - 各子 Skill 的 SKILL.md（详见 `skills/` 目录）
 
 ---
