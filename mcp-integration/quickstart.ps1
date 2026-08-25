@@ -343,7 +343,7 @@ function Configure-Mcp {
         args = @("${ProjectRoot}\mcp-integration\dist\orchestrator-tools.js")
         env = @{
             PROJECT_ROOT = $ProjectRoot
-            SKILL_BUNDLE_PATH = "${ProjectRoot}\mcp-integration"
+            SKILL_BUNDLE_PATH = $ProjectRoot
             START_MCP_TIMEOUT_MS = "120000"
             RUN_MCP_TIMEOUT_MS = "120000"
         }

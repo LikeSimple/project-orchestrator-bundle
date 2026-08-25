@@ -321,7 +321,7 @@ configure_mcp() {
   "args": ["${project_root}/mcp-integration/dist/orchestrator-tools.js"],
   "env": {
     "PROJECT_ROOT": "${project_root}",
-    "SKILL_BUNDLE_PATH": "${project_root}/mcp-integration",
+    "SKILL_BUNDLE_PATH": "${project_root}",
     "START_MCP_TIMEOUT_MS": "120000",
     "RUN_MCP_TIMEOUT_MS": "120000"
   }

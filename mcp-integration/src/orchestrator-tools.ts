@@ -33,8 +33,7 @@ import { resolve } from 'path';
 // ============================================================
 
 const PROJECT_ROOT = process.env.PROJECT_ROOT || process.cwd();
-const SKILL_BUNDLE_PATH = process.env.SKILL_BUNDLE_PATH ||
-  resolve(PROJECT_ROOT, 'project-orchestrator-bundle');
+const SKILL_BUNDLE_PATH = process.env.SKILL_BUNDLE_PATH || PROJECT_ROOT;
 const SKILL_CLI_BIN = process.env.SKILL_CLI_BIN ||
   resolve(SKILL_BUNDLE_PATH, 'mcp-integration/dist/skill-cli.cjs');
 

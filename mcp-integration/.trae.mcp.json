@@ -7,7 +7,7 @@
       ],
       "env": {
         "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/mcp-integration",
+        "SKILL_BUNDLE_PATH": "${workspaceFolder}",
         "START_MCP_TIMEOUT_MS": "120000",
         "RUN_MCP_TIMEOUT_MS": "120000"
       }
