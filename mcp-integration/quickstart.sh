@@ -4,10 +4,10 @@
 # ============================================================================
 #
 # 作用：
-#   1. 检查环境（Node.js / pnpm / git / MCP Host）
-#   2. 构建 Skill CLI（TypeScript → JavaScript）
-#   3. 配置 MCP（写入 .trae/mcp.json 或 ~/.claude.json 或 .cursor/mcp.json）
-#   4. 测试集成（运行 1-2 个 Tool 验证）
+#   1. 检查环境（Node.js / npm / git）
+#   2. 安装依赖 + 构建（npm install + npm run build）
+#   3. 配置 MCP Host（写入对应配置文件）
+#   4. 测试集成（调用 Skill CLI 验证）
 #
 # 用法：
 #   ./quickstart.sh                    # 交互式（默认）
@@ -15,7 +15,8 @@
 #   ./quickstart.sh --mcp=claude      # Claude Code
 #   ./quickstart.sh --mcp=cursor      # Cursor
 #   ./quickstart.sh --dry-run         # 仅检查，不写文件
-#   ./quickstart.sh --help            # 帮助
+#   ./quickstart.sh --skip-test      # 跳过集成测试
+#   ./quickstart.sh --help           # 帮助
 #
 # 退出码：
 #   0 = 成功
@@ -33,15 +34,12 @@ set -u  # 未定义变量即停
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUNDLE_DIR="$(dirname "$SCRIPT_DIR")"
 MCP_INTEGRATION_DIR="$SCRIPT_DIR"
-EXAMPLES_DIR="$MCP_INTEGRATION_DIR/examples"
-SKILL_CLI_SOURCE="$EXAMPLES_DIR/skill-cli.js"
-ORCHESTRATOR_TS="$MCP_INTEGRATION_DIR/orchestrator-tools.ts"
-SKILL_CLI_DIST="$MCP_INTEGRATION_DIR/dist/skill-cli.js"
-ORCHESTRATOR_DIST="$MCP_INTEGRATION_DIR/dist/orchestrator-tools.js"
 PKG_JSON="$MCP_INTEGRATION_DIR/package.json"
+TS_CONFIG="$MCP_INTEGRATION_DIR/tsconfig.json"
 DIST_DIR="$MCP_INTEGRATION_DIR/dist"
+ORCHESTRATOR_DIST="$DIST_DIR/orchestrator-tools.js"
+SKILL_CLI_DIST="$DIST_DIR/skill-cli.cjs"
 TMP_LOG="/tmp/orchestrator-quickstart.log"
 
 # 颜色定义
@@ -58,7 +56,6 @@ ICON_OK="✅"
 ICON_FAIL="❌"
 ICON_WARN="⚠️"
 ICON_INFO="ℹ️"
-ICON_ARROW="→"
 
 # ============================================================
 # 工具函数
@@ -68,10 +65,15 @@ log_info() { echo -e "${BLUE}${ICON_INFO}  $*${NC}"; }
 log_ok() { echo -e "${GREEN}${ICON_OK}  $*${NC}"; }
 log_warn() { echo -e "${YELLOW}${ICON_WARN}  $*${NC}"; }
 log_err() { echo -e "${RED}${ICON_FAIL}  $*${NC}"; }
-log_step() { echo -e "\n${CYAN}${BOLD}${ICON_ARROW} $*${NC}\n"; }
+log_step() { echo -e "\n${CYAN}${BOLD}=== $* ===${NC}\n"; }
 
-# 不带颜色的纯输出（用于被捕获的输出）
-raw_echo() { echo "$@"; }
+# 检查命令是否存在
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# 版本号比较（>=）
+version_ge() {
+  [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+}
 
 # 询问用户
 prompt_choice() {
@@ -85,14 +87,6 @@ prompt_choice() {
   local choice
   read -p "请选择 [1-${#options[@]}]: " choice
   echo "${options[$((choice - 1))]:-}"
-}
-
-# 检查命令是否存在
-has_cmd() { command -v "$1" >/dev/null 2>&1; }
-
-# 版本号比较（>=）
-version_ge() {
-  [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
 }
 
 # ============================================================
@@ -109,16 +103,16 @@ usage() {
 用法: $0 [选项]
 
 选项:
-  --mcp=<trae|claude|cursor>   选择 MCP Host（不指定则交互选择）
-  --dry-run                   仅检查环境，不写入任何文件
-  --skip-test                 跳过集成测试
-  --verbose                   详细日志输出
-  --help                      显示此帮助
+  --mcp=<trae|claude|cursor|vscode>   选择 MCP Host（不指定则交互选择）
+  --dry-run                          仅检查环境，不写入任何文件
+  --skip-test                        跳过集成测试
+  --verbose                          详细日志输出
+  --help                             显示此帮助
 
 示例:
-  $0                          # 交互式
-  $0 --mcp=trae               # 自动选择 Trae IDE
-  $0 --mcp=claude --verbose   # Claude Code + 详细日志
+  $0                                # 交互式
+  $0 --mcp=trae                     # 自动选择 Trae IDE
+  $0 --mcp=claude --verbose         # Claude Code + 详细日志
 EOF
 }
 
@@ -183,22 +177,16 @@ else
   check_failed=true
 fi
 
-# pnpm
-if has_cmd pnpm; then
-  PNPM_VERSION=$(pnpm -v)
-  log_ok "pnpm: $PNPM_VERSION"
-elif has_cmd npm; then
+# npm
+if has_cmd npm; then
   NPM_VERSION=$(npm -v)
-  log_warn "pnpm 未安装，将使用 npm（推荐 pnpm ≥ 8）"
-  log_info "  安装: npm install -g pnpm"
-  # 检查 npm 版本
   if version_ge "$NPM_VERSION" "v9.0.0"; then
-    log_ok "  fallback npm: $NPM_VERSION"
+    log_ok "npm: $NPM_VERSION"
   else
-    log_warn "  npm 版本较旧（$NPM_VERSION），建议升级到 ≥ 9"
+    log_warn "npm 版本较旧（$NPM_VERSION），建议升级到 ≥ 9"
   fi
 else
-  log_err "pnpm 和 npm 均未安装"
+  log_err "npm 未安装"
   check_failed=true
 fi
 
@@ -210,91 +198,39 @@ else
   log_warn "git 未安装（部分 Skill 需要，但不影响核心）"
 fi
 
-# uvx（git MCP server 需要）
-if has_cmd uvx; then
-  log_ok "uvx: $(uvx --version 2>&1 | head -1)"
-elif has_cmd uv; then
-  log_ok "uv: $(uv --version 2>&1 | head -1)"
-else
-  log_warn "uv/uvx 未安装（git MCP server 需要，可后续安装）"
-  log_info "  安装: curl -LsSf https://astral.sh/uv/install.sh | sh"
-fi
-
 if $check_failed; then
   log_err "环境检查失败，请先安装缺失的工具"
   exit 1
 fi
 
 # ============================================================
-# Step 2: 构建 Skill CLI
+# Step 2: 安装依赖 + 构建
 # ============================================================
 
-log_step "Step 2/4 · 构建 Skill CLI"
+log_step "Step 2/4 · 安装依赖 + 构建"
 
-# 2.1 检查依赖文件
+# 2.1 检查项目文件
 if [ ! -f "$PKG_JSON" ]; then
   log_err "未找到 package.json: $PKG_JSON"
   log_info "  请确认 mcp-integration 目录完整"
   exit 2
 fi
 
-if [ ! -f "$ORCHESTRATOR_TS" ]; then
-  log_err "未找到 orchestrator-tools.ts: $ORCHESTRATOR_TS"
+if [ ! -f "$TS_CONFIG" ]; then
+  log_err "未找到 tsconfig.json: $TS_CONFIG"
   exit 2
 fi
 
-if [ ! -f "$SKILL_CLI_SOURCE" ]; then
-  log_err "未找到 skill-cli.js: $SKILL_CLI_SOURCE"
-  exit 2
-fi
-
-log_ok "源文件齐全"
+log_ok "项目文件齐全"
 
 # 2.2 安装依赖
 if ! $DRY_RUN; then
-  log_info "安装 npm 依赖（tsx + @modelcontextprotocol/sdk）..."
-
-  # 检查是否已有 node_modules
   if [ -d "$MCP_INTEGRATION_DIR/node_modules" ]; then
-    log_info "  node_modules 已存在，跳过"
+    log_info "node_modules 已存在，跳过安装"
   else
+    log_info "安装 npm 依赖..."
     cd "$MCP_INTEGRATION_DIR"
-
-    # 选择包管理器
-    if has_cmd pnpm; then
-      PKG_MGR="pnpm"
-    else
-      PKG_MGR="npm"
-    fi
-
-    if [ ! -f "$PKG_JSON" ]; then
-      log_info "  未找到 package.json，正在创建..."
-      cat > "$PKG_JSON" <<'PKG_EOF'
-{
-  "name": "project-orchestrator-mcp",
-  "version": "1.0.0",
-  "description": "orchestrator-tools MCP Server + Skill CLI",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/orchestrator-tools.js",
-    "dev": "tsx orchestrator-tools.ts",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
-  }
-}
-PKG_EOF
-    fi
-
-    $PKG_MGR install --silent 2>&1 | tail -5 || {
+    npm install --silent 2>&1 | tail -3 || {
       log_err "依赖安装失败"
       exit 2
     }
@@ -302,61 +238,19 @@ PKG_EOF
   fi
 fi
 
-# 2.3 编译 TypeScript
+# 2.3 构建
 if ! $DRY_RUN; then
-  log_info "编译 TypeScript → JavaScript..."
-
-  if [ ! -f "$MCP_INTEGRATION_DIR/tsconfig.json" ]; then
-    cat > "$MCP_INTEGRATION_DIR/tsconfig.json" <<'TSCONFIG_EOF'
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "./dist",
-    "rootDir": "./",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "declaration": false,
-    "sourceMap": false
-  },
-  "include": ["*.ts"],
-  "exclude": ["node_modules", "dist", "examples"]
-}
-TSCONFIG_EOF
-  fi
-
+  log_info "构建项目（tsc + postbuild）..."
   cd "$MCP_INTEGRATION_DIR"
-
-  # 用 tsx 直接运行（推荐，避免编译）
-  # 也可编译成 dist
-  if has_cmd npx && npx tsx --version >/dev/null 2>&1; then
-    log_ok "tsx 可用（推荐直接运行）"
+  npm run build 2>&1 | tail -5 || {
+    log_err "构建失败"
+    exit 2
+  }
+  if [ -f "$ORCHESTRATOR_DIST" ] && [ -f "$SKILL_CLI_DIST" ]; then
+    log_ok "构建成功，产物已生成到 dist/"
   else
-    # 编译
-    if has_cmd npx; then
-      npx tsc --silent 2>&1 || {
-        log_warn "TypeScript 编译失败（可能不影响运行，使用 tsx 直接执行）"
-      }
-    fi
-    if [ -f "$ORCHESTRATOR_DIST" ]; then
-      log_ok "编译产物已生成: dist/"
-    else
-      log_info "将使用 tsx 直接执行 orchestrator-tools.ts"
-    fi
+    log_warn "构建完成但产物未找到，请检查 dist/ 目录"
   fi
-fi
-
-# 2.4 复制 Skill CLI 到 dist
-if ! $DRY_RUN; then
-  mkdir -p "$DIST_DIR"
-  cp "$SKILL_CLI_SOURCE" "$SKILL_CLI_DIST"
-  cp -r "$EXAMPLES_DIR/skills" "$DIST_DIR/skills"
-  log_ok "Skill CLI 已部署到 dist/"
-  log_info "  $SKILL_CLI_DIST"
 fi
 
 # ============================================================
@@ -374,14 +268,11 @@ if [ -z "$MCP_HOST" ]; then
     "Cursor")      MCP_HOST="cursor" ;;
     "VS Code")     MCP_HOST="vscode" ;;
     "全部")
-      # 全部配置
-      for h in trae claude cursor; do
+      for h in trae claude cursor vscode; do
         log_info "正在配置 $h..."
         configure_mcp "$h" || log_warn "配置 $h 失败，继续下一个"
       done
-      configure_mcp "vscode" || log_warn "配置 vscode 失败"
       log_step "✓ 所有 MCP Host 配置完成"
-      # 跳过单 host 配置
       MCP_HOST=""
       ;;
   esac
@@ -391,24 +282,19 @@ fi
 configure_mcp() {
   local host="$1"
   local config_path=""
-  local config_format=""
 
   case "$host" in
     trae)
       config_path="${PROJECT_ROOT:-$(pwd)}/.trae/mcp.json"
-      config_format="trae"
       ;;
     claude)
       config_path="$HOME/.claude.json"
-      config_format="claude"
       ;;
     cursor)
       config_path="$HOME/.cursor/mcp.json"
-      config_format="cursor"
       ;;
     vscode)
       config_path="${PROJECT_ROOT:-$(pwd)}/.vscode/mcp.json"
-      config_format="vscode"
       ;;
   esac
 
@@ -425,101 +311,58 @@ configure_mcp() {
     log_info "  备份现有配置: ${config_path}.bak.$(date +%s)"
   fi
 
-  # 生成配置 JSON
-  local config_json
-  if [ "$config_format" = "claude" ]; then
-    # Claude Code 支持 env 变量插值
-    config_json=$(cat <<'CONFIG_EOF'
+  # 读取已有配置并合并（使用 python 处理 JSON）
+  local project_root="${PROJECT_ROOT:-$(pwd)}"
+  local new_server_json
+  new_server_json=$(cat <<SERVER_EOF
 {
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"]
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"]
-    },
-    "orchestrator-tools": {
-      "command": "tsx",
-      "args": ["${workspaceFolder}/mcp-integration/orchestrator-tools.ts"],
-      "env": {
-        "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle",
-        "SKILL_CLI_BIN": "${workspaceFolder}/mcp-integration/dist/skill-cli.js"
-      }
-    }
+  "command": "node",
+  "args": ["${project_root}/mcp-integration/dist/orchestrator-tools.js"],
+  "env": {
+    "PROJECT_ROOT": "${project_root}",
+    "SKILL_BUNDLE_PATH": "${project_root}/mcp-integration",
+    "START_MCP_TIMEOUT_MS": "120000",
+    "RUN_MCP_TIMEOUT_MS": "120000"
   }
 }
-CONFIG_EOF
+SERVER_EOF
 )
+
+  # 合并到现有配置或新建
+  if [ -f "$config_path" ] && command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import json, sys
+with open('$config_path') as f:
+    config = json.load(f)
+server = json.loads('''$new_server_json''')
+if 'mcpServers' not in config:
+    config['mcpServers'] = {}
+config['mcpServers']['orchestrator-tools'] = server
+with open('$config_path', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null || {
+      # python 失败则覆盖写入
+      echo "{\"mcpServers\":{\"orchestrator-tools\":$new_server_json}}" | python3 -m json.tool > "$config_path" 2>/dev/null || echo "$new_server_json" > "$config_path"
+    }
   else
-    # Trae / Cursor / VS Code：使用 ${workspaceFolder}，但不支持 ${env:NAME}
-    config_json=$(cat <<'CONFIG_EOF'
+    # 无现有配置或无 python，新建
+    cat > "$config_path" <<CONFIG_EOF
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
-      "env": { "START_MCP_TIMEOUT_MS": "60000", "RUN_MCP_TIMEOUT_MS": "60000" }
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"]
-    },
-    "orchestrator-tools": {
-      "command": "tsx",
-      "args": ["${workspaceFolder}/mcp-integration/orchestrator-tools.ts"],
-      "env": {
-        "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle",
-        "SKILL_CLI_BIN": "${workspaceFolder}/mcp-integration/dist/skill-cli.js"
-      }
-    }
+    "orchestrator-tools": ${new_server_json}
   }
 }
 CONFIG_EOF
-)
   fi
 
-  echo "$config_json" | python3 -m json.tool > /dev/null 2>&1 || {
-    log_err "生成的 JSON 配置不合法"
-    return 1
-  }
-
-  echo "$config_json" > "$config_path"
   log_ok "已配置 $host: $config_path"
 }
 
 if [ -n "$MCP_HOST" ]; then
-  if ! configure_mcp "$MCP_HOST"; then
+  configure_mcp "$MCP_HOST" || {
     log_err "MCP 配置失败"
     exit 3
-  fi
+  }
 fi
 
 # ============================================================
@@ -542,26 +385,41 @@ fi
 
 # 测试 1: Skill CLI 直接调用
 log_info "测试 1/2 · Skill CLI 直接调用..."
-test_output=$(cd "${PROJECT_ROOT:-$(pwd)}" && node "$SKILL_CLI_DIST" scaffold-runner run --input '{"stack":"react-vite","packageManager":"pnpm"}' --project-root "$(pwd)" 2>&1) || true
-
-if echo "$test_output" | head -1 | grep -q '"ok"'; then
-  log_ok "Skill CLI 可调用"
+if [ -f "$SKILL_CLI_DIST" ]; then
+  test_output=$(node "$SKILL_CLI_DIST" scaffold-runner list 2>&1) || true
   if echo "$test_output" | head -1 | grep -q '"ok":true'; then
-    log_ok "  scaffold-runner.run 成功"
-  else
+    log_ok "Skill CLI 可调用，scaffold-runner.list 成功"
+  elif echo "$test_output" | head -1 | grep -q '"ok"'; then
     log_warn "  返回了 ok:false（可能是依赖未安装，但接口正常）"
+  else
+    log_warn "Skill CLI 输出格式异常（请检查）"
+    log_info "  输出: $(echo "$test_output" | head -c 200)"
   fi
 else
-  log_warn "Skill CLI 输出格式异常（请检查）"
-  log_info "  输出: $test_output" | head -5
+  log_warn "Skill CLI 未构建，跳过测试: $SKILL_CLI_DIST"
 fi
 
-# 测试 2: orchestrator-tools.ts 语法检查
-log_info "测试 2/2 · orchestrator-tools.ts 语法检查..."
-if npx tsc --noEmit "$ORCHESTRATOR_TS" 2>&1 | head -20; then
-  log_ok "TypeScript 语法正确"
+# 测试 2: orchestrator-tools 启动检查
+log_info "测试 2/2 · orchestrator-tools 启动检查..."
+if [ -f "$ORCHESTRATOR_DIST" ]; then
+  # 后台启动，等待 1.5s 检查是否还在运行
+  node "$ORCHESTRATOR_DIST" < /dev/null > /tmp/mcp-stdout.tmp 2> /tmp/mcp-stderr.tmp &
+  MCP_PID=$!
+  sleep 1.5
+  if kill -0 "$MCP_PID" 2>/dev/null; then
+    log_ok "orchestrator-tools 进程启动成功"
+    kill "$MCP_PID" 2>/dev/null
+    wait "$MCP_PID" 2>/dev/null || true
+  else
+    wait "$MCP_PID" 2>/dev/null || true
+    EXIT_CODE=$?
+    log_warn "orchestrator-tools 启动后立即退出（exit code: $EXIT_CODE）"
+    if [ -s /tmp/mcp-stderr.tmp ]; then
+      log_info "  stderr: $(head -c 300 /tmp/mcp-stderr.tmp)"
+    fi
+  fi
 else
-  log_warn "TypeScript 检查发现问题（详见上方）"
+  log_warn "orchestrator-tools 未构建，跳过测试: $ORCHESTRATOR_DIST"
 fi
 
 # ============================================================
@@ -570,13 +428,24 @@ fi
 
 log_step "✓ 部署完成"
 
+MCP_DISPLAY="${MCP_HOST:-全部（trae / claude / cursor / vscode）}"
+
 cat <<EOF
-�� 部署摘要：
-  MCP Host:     ${MCP_HOST:-"全部（trae / claude / cursor）"}
+
+部署摘要：
+  MCP Host:     ${MCP_DISPLAY}
   Skill CLI:    $SKILL_CLI_DIST
   Orchestrator: $ORCHESTRATOR_DIST
   Project Root: ${PROJECT_ROOT:-$(pwd)}
 
-�� 后续步骤：
+后续步骤：
   1. 重启 $MCP_HOST 以加载新配置
-  2. 在对话框输入「列出可用 MCP
+  2. 在对话框输入「列出可用 MCP 工具」验证
+  3. 测试一个简单 Tool：「用 scaffold-runner 查看可用的技术栈」
+  4. 详细使用：参考 mcp-integration/README.md
+
+文档：
+  - 集成方案：mcp-integration/README.md
+  - 环境配置：docs/env-setup.md
+  - 成熟度报告：maturity-analysis-report.md
+EOF

@@ -65,11 +65,11 @@
       "_comment": "project-orchestrator-bundle 的 MCP Server：15 个 Tool + MCP Sampling（Skill 复用 Agent LLM）",
       "command": "node",
       "args": [
-        "${workspaceFolder}/project-orchestrator-bundle/mcp-integration/dist/orchestrator-tools.js"
+        "${workspaceFolder}/mcp-integration/dist/orchestrator-tools.js"
       ],
       "env": {
         "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/project-orchestrator-bundle",
+        "SKILL_BUNDLE_PATH": "${workspaceFolder}/mcp-integration",
         "START_MCP_TIMEOUT_MS": "120000",
         "RUN_MCP_TIMEOUT_MS": "120000"
       }

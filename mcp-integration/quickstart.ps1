@@ -4,10 +4,10 @@
 # ============================================================================
 #
 # 作用：
-#   1. 检查环境（Node.js / pnpm / git / MCP Host）
-#   2. 构建 Skill CLI（TypeScript → JavaScript）
-#   3. 配置 MCP（写入 .trae/mcp.json 或 %USERPROFILE%\.claude.json 等）
-#   4. 测试集成（运行 1-2 个 Tool 验证）
+#   1. 检查环境（Node.js / npm / git）
+#   2. 安装依赖 + 构建（npm install + npm run build）
+#   3. 配置 MCP Host（写入对应配置文件）
+#   4. 测试集成（调用 Skill CLI 验证）
 #
 # 用法：
 #   .\quickstart.ps1                    # 交互式（默认）
@@ -16,7 +16,6 @@
 #   .\quickstart.ps1 -MCP cursor       # Cursor
 #   .\quickstart.ps1 -DryRun           # 仅检查，不写文件
 #   .\quickstart.ps1 -SkipTest         # 跳过集成测试
-#   .\quickstart.ps1 -Verbose          # 详细日志输出
 #   .\quickstart.ps1 -Help             # 帮助
 #
 # 退出码：
@@ -26,6 +25,7 @@
 #   3 = 配置失败
 #   4 = 测试失败
 # ============================================================================
+#>
 
 [CmdletBinding()]
 param(
@@ -34,7 +34,6 @@ param(
 
     [switch]$DryRun,
     [switch]$SkipTest,
-    [switch]$Verbose,
     [switch]$Help
 )
 
@@ -45,16 +44,12 @@ $ErrorActionPreference = 'Stop'
 # ============================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$BundleDir = Split-Path -Parent $ScriptDir
 $McpIntegrationDir = $ScriptDir
-$ExamplesDir = Join-Path $McpIntegrationDir 'examples'
-$SkillCliSource = Join-Path $ExamplesDir 'skill-cli.js'
-$OrchestratorTs = Join-Path $McpIntegrationDir 'orchestrator-tools.ts'
-$SkillCliDist = Join-Path $McpIntegrationDir 'dist/skill-cli.js'
-$OrchestratorDist = Join-Path $McpIntegrationDir 'dist/orchestrator-tools.js'
 $PkgJson = Join-Path $McpIntegrationDir 'package.json'
+$TsConfig = Join-Path $McpIntegrationDir 'tsconfig.json'
 $DistDir = Join-Path $McpIntegrationDir 'dist'
-$TmpLog = Join-Path $env:TEMP 'orchestrator-quickstart.log'
+$OrchestratorDist = Join-Path $DistDir 'orchestrator-tools.js'
+$SkillCliDist = Join-Path $DistDir 'skill-cli.cjs'
 
 # 颜色
 $Colors = @{
@@ -127,13 +122,12 @@ if ($Help) {
   -MCP <trae|claude|cursor|vscode|all>   选择 MCP Host
   -DryRun                                 仅检查，不写文件
   -SkipTest                               跳过集成测试
-  -Verbose                                 详细日志
   -Help                                   显示此帮助
 
 示例:
   .\quickstart.ps1                        # 交互式
   .\quickstart.ps1 -MCP trae              # Trae IDE
-  .\quickstart.ps1 -MCP claude -Verbose  # Claude Code + 详细
+  .\quickstart.ps1 -MCP claude           # Claude Code
 "@
     exit 0
 }
@@ -183,20 +177,16 @@ if (Has-Cmd 'node') {
     $envOk = $false
 }
 
-# pnpm
-if (Has-Cmd 'pnpm') {
-    Log-Ok "pnpm: $(pnpm -v)"
-} elseif (Has-Cmd 'npm') {
+# npm
+if (Has-Cmd 'npm') {
     $npmVersion = npm -v
-    Log-Warn "pnpm 未安装，将使用 npm（推荐 pnpm ≥ 8）"
-    Log-Info "  安装: npm install -g pnpm"
     if (Version-Ge $npmVersion '9.0.0') {
-        Log-Ok "  fallback npm: $npmVersion"
+        Log-Ok "npm: $npmVersion"
     } else {
-        Log-Warn "  npm 版本较旧（$npmVersion），建议升级到 ≥ 9"
+        Log-Warn "npm 版本较旧（$npmVersion），建议升级到 ≥ 9"
     }
 } else {
-    Log-Err "pnpm 和 npm 均未安装"
+    Log-Err "npm 未安装"
     $envOk = $false
 }
 
@@ -208,160 +198,77 @@ if (Has-Cmd 'git') {
     Log-Warn "git 未安装（部分 Skill 需要，但不影响核心）"
 }
 
-# uvx
-if (Has-Cmd 'uvx') {
-    Log-Ok "uvx: $(uvx --version 2>&1 | Select-Object -First 1)"
-} elseif (Has-Cmd 'uv') {
-    Log-Ok "uv: $(uv --version 2>&1 | Select-Object -First 1)"
-} else {
-    Log-Warn "uv/uvx 未安装（git MCP server 需要，可后续安装）"
-    Log-Info "  安装: irm https://astral.sh/uv/install.ps1 | iex"
-}
-
 if (-not $envOk) {
     Log-Err "环境检查失败，请先安装缺失的工具"
     exit 1
 }
 
 # ============================================================
-# Step 2: 构建 Skill CLI
+# Step 2: 安装依赖 + 构建
 # ============================================================
 
-Log-Step "Step 2/4 · 构建 Skill CLI"
+Log-Step "Step 2/4 · 安装依赖 + 构建"
 
-# 2.1 检查依赖文件
+# 2.1 检查项目文件
 if (-not (Test-Path $PkgJson)) {
     Log-Err "未找到 package.json: $PkgJson"
-    Log-Info "  请确认 mcp-integration 目录完整"
     exit 2
 }
-
-if (-not (Test-Path $OrchestratorTs)) {
-    Log-Err "未找到 orchestrator-tools.ts: $OrchestratorTs"
+if (-not (Test-Path $TsConfig)) {
+    Log-Err "未找到 tsconfig.json: $TsConfig"
     exit 2
 }
-
-if (-not (Test-Path $SkillCliSource)) {
-    Log-Err "未找到 skill-cli.js: $SkillCliSource"
-    exit 2
-}
-
-Log-Ok "源文件齐全"
+Log-Ok "项目文件齐全"
 
 # 2.2 安装依赖
 if (-not $DryRun) {
-    Log-Info "安装 npm 依赖..."
-
     if (Test-Path (Join-Path $McpIntegrationDir 'node_modules')) {
-        Log-Info "  node_modules 已存在，跳过"
+        Log-Info "node_modules 已存在，跳过安装"
     } else {
+        Log-Info "安装 npm 依赖..."
         Push-Location $McpIntegrationDir
-
-        if (-not (Test-Path $PkgJson)) {
-            Log-Info "  未找到 package.json，正在创建..."
-            @'
-{
-  "name": "project-orchestrator-mcp",
-  "version": "1.0.0",
-  "description": "orchestrator-tools MCP Server + Skill CLI",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/orchestrator-tools.js",
-    "dev": "tsx orchestrator-tools.ts",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
-  }
-}
-'@ | Out-File -FilePath $PkgJson -Encoding UTF8
-        }
-
-        $pkgMgr = if (Has-Cmd 'pnpm') { 'pnpm' } else { 'npm' }
         try {
-            & $pkgMgr install --silent 2>&1 | Select-Object -Last 5
+            npm install --silent 2>&1 | Select-Object -Last 3
+            if ($LASTEXITCODE -ne 0) {
+                Log-Err "依赖安装失败"
+                Pop-Location
+                exit 2
+            }
         } catch {
-            Log-Err "依赖安装失败"
+            Log-Err "依赖安装失败：$($_.Exception.Message)"
             Pop-Location
             exit 2
         }
         Pop-Location
-
         Log-Ok "依赖安装完成"
     }
 }
 
-# 2.3 编译 TypeScript
+# 2.3 构建
 if (-not $DryRun) {
-    Log-Info "编译 TypeScript → JavaScript..."
-
-    if (-not (Test-Path (Join-Path $McpIntegrationDir 'tsconfig.json'))) {
-        @'
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "./dist",
-    "rootDir": "./",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "declaration": false,
-    "sourceMap": false
-  },
-  "include": ["*.ts"],
-  "exclude": ["node_modules", "dist", "examples"]
-}
-'@ | Out-File -FilePath (Join-Path $McpIntegrationDir 'tsconfig.json') -Encoding UTF8
-    }
-
-    # 直接用 tsx（推荐，避免编译）
+    Log-Info "构建项目（tsc + postbuild）..."
+    Push-Location $McpIntegrationDir
     try {
-        $tsxVersion = npx tsx --version 2>&1 | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0) {
-            Log-Ok "tsx 可用（推荐直接运行）"
+        npm run build 2>&1 | Select-Object -Last 5
+        if ($LASTEXITCODE -ne 0) {
+            Log-Err "构建失败"
+            Pop-Location
+            exit 2
         }
     } catch {
-        # 尝试编译
-        Push-Location $McpIntegrationDir
-        try {
-            npx tsc --silent 2>&1 | Out-Null
-            if (Test-Path $OrchestratorDist) {
-                Log-Ok "编译产物已生成: dist/"
-            }
-        } catch {
-            Log-Warn "TypeScript 编译失败（可能不影响运行，使用 tsx 直接执行）"
-        }
+        Log-Err "构建失败：$($_.Exception.Message)"
         Pop-Location
+        exit 2
     }
-}
+    Pop-Location
 
-# 2.4 复制 Skill CLI 到 dist
-if (-not $DryRun) {
-    if (-not (Test-Path $DistDir)) {
-        New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
+    $orchestratorExists = Test-Path $OrchestratorDist
+    $skillCliExists = Test-Path $SkillCliDist
+    if ($orchestratorExists -and $skillCliExists) {
+        Log-Ok "构建成功，产物已生成到 dist/"
+    } else {
+        Log-Warn "构建完成但产物未找到，请检查 dist/ 目录"
     }
-    Copy-Item $SkillCliSource $SkillCliDist -Force
-    $skillsSource = Join-Path $ExamplesDir 'skills'
-    $skillsDest = Join-Path $DistDir 'skills'
-    if (Test-Path $skillsSource) {
-        if (Test-Path $skillsDest) {
-            Remove-Item $skillsDest -Recurse -Force
-        }
-        Copy-Item $skillsSource $skillsDest -Recurse -Force
-    }
-    Log-Ok "Skill CLI 已部署到 dist/"
-    Log-Info "  $SkillCliDist"
 }
 
 # ============================================================
@@ -386,14 +293,14 @@ if ([string]::IsNullOrEmpty($MCP)) {
 # 3.2 配置函数
 function Configure-Mcp {
     param(
-        [string]$Host,
+        [string]$McpHost,
         [string]$ProjectRoot
     )
 
     $configPath = ''
     $configFormat = ''
 
-    switch ($Host) {
+    switch ($McpHost) {
         'trae' {
             $configPath = Join-Path $ProjectRoot '.trae/mcp.json'
             $configFormat = 'trae'
@@ -417,122 +324,64 @@ function Configure-Mcp {
         return
     }
 
-    # 创建目录
+    # 读取已有配置（如果存在）
+    $existingConfig = $null
+    if (Test-Path $configPath) {
+        try {
+            $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+            $backupPath = "$configPath.bak.$((Get-Date).ToString('yyyyMMddHHmmss'))"
+            Copy-Item $configPath $backupPath
+            Log-Info "  备份现有配置: $backupPath"
+        } catch {
+            Log-Warn "  读取现有配置失败，将覆盖写入"
+        }
+    }
+
+    # 生成 orchestrator-tools 配置片段
+    $orchestratorServer = @{
+        command = "node"
+        args = @("${ProjectRoot}\mcp-integration\dist\orchestrator-tools.js")
+        env = @{
+            PROJECT_ROOT = $ProjectRoot
+            SKILL_BUNDLE_PATH = "${ProjectRoot}\mcp-integration"
+            START_MCP_TIMEOUT_MS = "120000"
+            RUN_MCP_TIMEOUT_MS = "120000"
+        }
+    }
+
+    # 构建或合并配置
+    if ($null -ne $existingConfig -and $existingConfig.mcpServers) {
+        $existingConfig.mcpServers | Add-Member -NotePropertyName 'orchestrator-tools' -NotePropertyValue $orchestratorServer -Force
+        $configObj = $existingConfig
+    } else {
+        $configObj = [PSCustomObject]@{
+            mcpServers = [PSCustomObject]@{
+                'orchestrator-tools' = $orchestratorServer
+            }
+        }
+    }
+
+    # 写入
     $configDir = Split-Path -Parent $configPath
     if (-not (Test-Path $configDir)) {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     }
 
-    # 备份现有配置
-    if (Test-Path $configPath) {
-        $backupPath = "$configPath.bak.$((Get-Date).ToString('yyyyMMddHHmmss'))"
-        Copy-Item $configPath $backupPath
-        Log-Info "  备份现有配置: $backupPath"
-    }
-
-    # 生成配置
-    $config = switch ($configFormat) {
-        'claude' {
-            @'
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"]
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"]
-    },
-    "orchestrator-tools": {
-      "command": "tsx",
-      "args": ["${workspaceFolder}/mcp-integration/orchestrator-tools.ts"],
-      "env": {
-        "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle",
-        "SKILL_CLI_BIN": "${workspaceFolder}/mcp-integration/dist/skill-cli.js"
-      }
-    }
-  }
-}
-'@
-        }
-        default {
-            # trae / cursor / vscode（支持 ${workspaceFolder}）
-            @'
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
-      "env": { "START_MCP_TIMEOUT_MS": "60000", "RUN_MCP_TIMEOUT_MS": "60000" }
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"]
-    },
-    "orchestrator-tools": {
-      "command": "tsx",
-      "args": ["${workspaceFolder}/mcp-integration/orchestrator-tools.ts"],
-      "env": {
-        "PROJECT_ROOT": "${workspaceFolder}",
-        "SKILL_BUNDLE_PATH": "${workspaceFolder}/.trae/skills/project-orchestrator-bundle",
-        "SKILL_CLI_BIN": "${workspaceFolder}/mcp-integration/dist/skill-cli.js"
-      }
-    }
-  }
-}
-'@
-        }
-    }
-
-    # 验证 JSON
-    try {
-        $null = $config | ConvertFrom-Json
-    } catch {
-        Log-Err "生成的 JSON 配置不合法"
-        return
-    }
-
-    # 写入
-    $config | Out-File -FilePath $configPath -Encoding UTF8
-    Log-Ok "已配置 $Host`: $configPath"
+    $configJson = $configObj | ConvertTo-Json -Depth 10
+    $configJson | Out-File -FilePath $configPath -Encoding UTF8
+    Log-Ok "已配置 $McpHost`: $configPath"
 }
 
 # 3.3 执行配置
-$projectRoot = (Get-Location).Path
+$projectRoot = Split-Path -Parent $McpIntegrationDir
 if ($MCP -eq 'all') {
-    foreach ($h in @('trae', 'claude', 'cursor')) {
+    foreach ($h in @('trae', 'claude', 'cursor', 'vscode')) {
         Log-Info "正在配置 $h..."
-        Configure-Mcp -Host $h -ProjectRoot $projectRoot
+        Configure-Mcp -McpHost $h -ProjectRoot $projectRoot
     }
-    Configure-Mcp -Host 'vscode' -ProjectRoot $projectRoot
 } else {
-    if (-not (Configure-Mcp -Host $MCP -ProjectRoot $projectRoot)) {
+    Configure-Mcp -McpHost $MCP -ProjectRoot $projectRoot
+    if ($LASTEXITCODE -ne 0) {
         Log-Err "MCP 配置失败"
         exit 3
     }
@@ -558,40 +407,46 @@ if ($DryRun) {
 
 # 测试 1: Skill CLI 直接调用
 Log-Info "测试 1/2 · Skill CLI 直接调用..."
-try {
-    $testJson = '{"stack":"react-vite","packageManager":"pnpm"}'
-    $testOutput = & node $SkillCliDist scaffold-runner run --input $testJson --project-root $projectRoot 2>&1 | Out-String
-
-    if ($testOutput -match '"ok"') {
-        Log-Ok "Skill CLI 可调用"
+if (Test-Path $SkillCliDist) {
+    try {
+        $testOutput = & node $SkillCliDist scaffold-runner list 2>&1 | Out-String
         if ($testOutput -match '"ok":true') {
-            Log-Ok "  scaffold-runner.run 成功"
-        } else {
+            Log-Ok "Skill CLI 可调用，scaffold-runner.list 成功"
+        } elseif ($testOutput -match '"ok"') {
             Log-Warn "  返回了 ok:false（可能是依赖未安装，但接口正常）"
+        } else {
+            Log-Warn "Skill CLI 输出格式异常（请检查）"
+            $snippet = $testOutput.Substring(0, [Math]::Min(200, $testOutput.Length))
+            Log-Info "  输出: $snippet"
         }
-    } else {
-        Log-Warn "Skill CLI 输出格式异常（请检查）"
-        Log-Info "  输出: $($testOutput.Substring(0, [Math]::Min(200, $testOutput.Length)))"
+    } catch {
+        Log-Warn "Skill CLI 调用失败：$($_.Exception.Message)"
     }
-} catch {
-    Log-Warn "Skill CLI 调用失败：$($_.Exception.Message)"
+} else {
+    Log-Warn "Skill CLI 未构建，跳过测试: $SkillCliDist"
 }
 
-# 测试 2: orchestrator-tools.ts 语法检查
-Log-Info "测试 2/2 · orchestrator-tools.ts 语法检查..."
-try {
-    Push-Location $McpIntegrationDir
-    $tscOutput = & npx tsc --noEmit $OrchestratorTs 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) {
-        Log-Ok "TypeScript 语法正确"
-    } else {
-        Log-Warn "TypeScript 检查发现问题"
-        Log-Info $tscOutput.Substring(0, [Math]::Min(500, $tscOutput.Length))
+# 测试 2: orchestrator-tools 启动检查
+Log-Info "测试 2/2 · orchestrator-tools 启动检查..."
+if (Test-Path $OrchestratorDist) {
+    try {
+        $proc = Start-Process -FilePath 'node' -ArgumentList "`"$OrchestratorDist`"" -PassThru -NoNewWindow -RedirectStandardInput (Join-Path $env:TEMP 'mcp-stdin.tmp') -RedirectStandardOutput (Join-Path $env:TEMP 'mcp-stdout.tmp') -RedirectStandardError (Join-Path $env:TEMP 'mcp-stderr.tmp') -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 1500
+        if ($proc -and -not $proc.HasExited) {
+            Log-Ok "orchestrator-tools 进程启动成功"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        } elseif ($proc) {
+            $stderr = Get-Content (Join-Path $env:TEMP 'mcp-stderr.tmp') -ErrorAction SilentlyContinue -Raw
+            Log-Warn "orchestrator-tools 启动后立即退出（exit code: $($proc.ExitCode)）"
+            if ($stderr) {
+                Log-Info "  stderr: $($stderr.Substring(0, [Math]::Min(300, $stderr.Length)))"
+            }
+        }
+    } catch {
+        Log-Warn "orchestrator-tools 启动检查失败：$($_.Exception.Message)"
     }
-} catch {
-    Log-Warn "TypeScript 检查失败：$($_.Exception.Message)"
-} finally {
-    Pop-Location
+} else {
+    Log-Warn "orchestrator-tools 未构建，跳过测试: $OrchestratorDist"
 }
 
 # ============================================================
@@ -600,21 +455,25 @@ try {
 
 Log-Step "✓ 部署完成"
 
-$mcpDisplay = if ($MCP -eq 'all') { '全部（trae / claude / cursor）' } else { $MCP }
+$mcpDisplay = if ($MCP -eq 'all') { '全部（trae / claude / cursor / vscode）' } else { $MCP }
 
-@"
+$summary = @"
 
-�� 部署摘要：
+部署摘要：
   MCP Host:     $mcpDisplay
   Skill CLI:    $SkillCliDist
   Orchestrator: $OrchestratorDist
   Project Root: $projectRoot
 
-�� 后续步骤：
+后续步骤：
   1. 重启 $mcpDisplay 以加载新配置
   2. 在对话框输入「列出可用 MCP 工具」验证
   3. 测试一个简单 Tool：「用 scaffold-runner 查看可用的技术栈」
   4. 详细使用：参考 mcp-integration/README.md
 
-�� 文档：
+文档：
   - 集成方案：mcp-integration/README.md
+  - 环境配置：docs/env-setup.md
+  - 成熟度报告：maturity-analysis-report.md
+"@
+Write-Host $summary -ForegroundColor White
