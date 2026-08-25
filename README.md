@@ -128,6 +128,51 @@ node dist/skill-cli.cjs review-checklist diff --input '{"diffText":"diff --git .
 node dist/skill-cli.cjs git-workflow conflict --input '{"strategy":"manual"}'
 ```
 
+### 跨项目复用：一套 Bundle，多个项目
+
+Skill Bundle 只需安装构建一次，即可在任意项目中复用。核心是区分两个路径：
+
+| 环境变量 | 含义 | 示例 |
+|---|---|---|
+| `SKILL_BUNDLE_PATH` | Skill Bundle 本身的位置（工具代码在哪） | `D:/tools/project-orchestrator-bundle` |
+| `PROJECT_ROOT` | 当前目标项目根目录（你要开发的项目） | `D:/work/my-new-app` |
+
+**在新项目中使用：**
+
+```bash
+# 方式一：用 quickstart 脚本自动配置（推荐）
+cd my-new-app
+
+# Windows
+..\project-orchestrator-bundle\mcp-integration\quickstart.ps1 -MCP trae
+
+# macOS / Linux
+bash ../project-orchestrator-bundle/mcp-integration/quickstart.sh --mcp=trae
+```
+
+脚本会自动在新项目的 `.trae/mcp.json` 中写入配置：
+- `args` 指向 Skill Bundle 的 `orchestrator-tools.js`（复用同一份工具代码）
+- `PROJECT_ROOT` 指向当前新项目（产物生成在项目内）
+- `SKILL_BUNDLE_PATH` 指向 Skill Bundle 目录
+
+```bash
+# 方式二：手动配置 .trae/mcp.json
+{
+  "mcpServers": {
+    "orchestrator-tools": {
+      "command": "node",
+      "args": ["D:/tools/project-orchestrator-bundle/mcp-integration/dist/orchestrator-tools.js"],
+      "env": {
+        "PROJECT_ROOT": "${workspaceFolder}",
+        "SKILL_BUNDLE_PATH": "D:/tools/project-orchestrator-bundle"
+      }
+    }
+  }
+}
+```
+
+> **验证**：调用 `spec_bootstrap_constitution` 后，检查 **新项目目录**下是否生成了 `.specify/memory/constitution.md`。生成在新项目里 = 配置正确；生成在 Skill Bundle 目录里 = `PROJECT_ROOT` 设错了。
+
 ## 目录结构
 
 ```
@@ -434,6 +479,29 @@ graph TB
 三层分析架构（每个 Skill 内部）：AST 预检测（精确事实）→ 代码模式分析（结构化识别）→ LLM 深度分析（上下文推理）。
 
 ## 核心工作流
+
+### 项目宪法：所有 Skill 的治理中枢
+
+在 Phase 1 最开始，通过 `spec_bootstrap_constitution` 生成 `.specify/memory/constitution.md`（项目宪法），它是整个 Skill Bundle 的"最高法则"，后续 14 个 Skill 都会读取并严格遵循：
+
+```
+spec_bootstrap_constitution
+        ↓ 生成
+.specify/memory/constitution.md
+        ↓ 被以下 Skill 读取并遵循
+├── spec-bootstrap (specify/plan/...)  → 按宪法中的技术栈/规范生成方案
+├── scaffold-runner                    → 按宪法选择项目模板
+├── code-patterns                      → 按宪法中的代码规范生成模式
+├── git-workflow                       → 按宪法中的提交规范执行
+├── review-checklist                   → 按宪法中的业务术语/质量红线评审
+├── dependency-auditor                 → 按宪法中的依赖规则审计
+├── environment-manager                → 按宪法中的环境约束配置
+├── implement-executor                 → 按宪法中的架构风格生成代码
+├── test-runner                        → 按宪法中的测试策略运行
+└── ... 全部 15 个 Skill
+```
+
+任何 Skill 运行时如果发现与宪法冲突，会中止并报告，而非静默偏离。这保证了多 Skill 协作时的一致性。
 
 ### Phase 1 · 项目初始化
 
