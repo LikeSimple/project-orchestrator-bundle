@@ -1246,6 +1246,27 @@ ${Object.entries(envVars).map(([key, value]) =>
       // 静默回退
       result.data.llmEnhanced = false;
     }
+
+    // 深度环境安全分析：将 AST 预检测结果传给 LLM 进行结构化风险评估
+    const envSecResult = await llm.analyzeEnvSecurity({
+      envVars,
+      sensitiveKeys: Object.keys(envVars).filter(k => isSensitiveKey(k)),
+      fileContents: Object.entries(envVars).map(([k, v]) => `${k}=${isSensitiveKey(k) ? maskSecret(v) : v}`).join('\n'),
+      astFindings: astUsage.astEnhanced ? [
+        ...astUsage.hardcodedSecrets.map(hs => ({ type: 'hardcoded-secret', key: hs.key, description: `${hs.file}:${hs.line}` })),
+        ...astUsage.usedNotDeclared.map(k => ({ type: 'missing', key: k, description: 'used but not declared' })),
+        ...astUsage.declaredNotUsed.map(k => ({ type: 'unused', key: k, description: 'declared but not used' })),
+      ] : [],
+      env: targetEnv,
+    });
+
+    if (envSecResult.ok && envSecResult.analysis) {
+      result.data.llmEnhanced = true;
+      result.data.envSecurityScore = envSecResult.analysis.score;
+      if (envSecResult.analysis.recommendations) {
+        result.nextActions.push(...envSecResult.analysis.recommendations.slice(0, 3));
+      }
+    }
   }
 
   return result;

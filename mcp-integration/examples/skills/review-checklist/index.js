@@ -2209,6 +2209,33 @@ async function runLLMReview(ctx) {
         }
       }
     }
+
+    // 深度安全分析：将 AST 预检测结果传给 LLM 进行上下文增强
+    const astFindingsForFile = (ctx._astIssues || []).filter(a => a.file === file);
+    const secResult = await llm.analyzeSecurity({
+      code: codeSnippet,
+      filePath: file,
+      fileType: detectLang(file),
+      astFindings: astFindingsForFile.map(a => ({ type: a.id, line: a.line, description: a.message })),
+      checklist: ['OWASP Top 10', 'hardcoded secrets', 'injection risks', 'XSS', 'auth bypass'],
+    });
+
+    if (secResult.ok && secResult.audit && secResult.audit.findings) {
+      for (const finding of secResult.audit.findings.slice(0, 5)) {
+        llmIssues.push({
+          id: `SEC-${llmIssues.length + 1}`,
+          severity: finding.severity === 'critical' ? 'critical' :
+                    finding.severity === 'high' ? 'error' :
+                    finding.severity === 'medium' ? 'warn' : 'info',
+          category: 'SEC',
+          message: `${path.basename(file)}: ${finding.description}`,
+          suggestion: finding.remediation || '',
+          file,
+          line: finding.line || null,
+          source: 'llm-security',
+        });
+      }
+    }
   }
 
   return { available: true, issues: llmIssues };
@@ -2321,7 +2348,10 @@ async function reviewPR({ base = 'main', prNumber, strictMode = true, categories
   const ctx = { diff, files, fileContents, projectRoot: cwd, patterns };
   const staticIssues = await runRules(ctx, cats);
 
-  // 6. LLM 辅助审查（可选）
+  // 5.5 运行 AST 分析并注入到 ctx，供 LLM 安全分析使用
+  ctx._astIssues = await runASTAnalysis(ctx);
+
+  // 6. LLM 辅助审查（可选，包含深度安全分析）
   let llmIssues = [];
   let llmEnhanced = false;
   if (useLLM && llm.isAvailable()) {

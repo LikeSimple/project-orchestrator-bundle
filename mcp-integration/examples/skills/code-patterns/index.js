@@ -5431,6 +5431,20 @@ ${sourceCode}
       // AST 分析失败不影响主流程
     }
 
+    // 深度模式分析：将 AST 结构数据传给 LLM 进行模式识别增强
+    if (astAnalysis && astAnalysis.detectedPatterns) {
+      const patternResult = await llm.analyzeCodePatterns({
+        code: refactoredCode.slice(0, 4000),
+        filePath: sourceFile,
+        framework,
+        existingPatterns: astAnalysis.detectedPatterns.map(p => p.pattern || p.name || p),
+      });
+
+      if (patternResult.ok && patternResult.analysis) {
+        astAnalysis.llmPatterns = patternResult.analysis;
+      }
+    }
+
     let outputPath = null;
     if (outputFile) {
       fs.writeFileSync(outputFile, refactoredCode, 'utf8');

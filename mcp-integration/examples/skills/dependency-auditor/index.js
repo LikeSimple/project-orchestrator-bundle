@@ -889,6 +889,26 @@ ${JSON.stringify(licenseIssues, null, 2)}
         llmAnalysis = { raw: llmResult.content };
       }
     }
+
+    // 深度依赖风险分析：使用结构化 API 传递 AST 依赖使用数据
+    const depList = Object.entries(allDeps).map(([name, version]) => ({ name, version }));
+    const riskResult = await llm.analyzeDependencyRisk({
+      dependencies: depList,
+      devDependencies: [],
+      auditData: vulnerabilities.slice(0, 30),
+      outdated: [],
+      projectType: ecosystem,
+    });
+
+    if (riskResult.ok && riskResult.analysis) {
+      llmEnhanced = true;
+      if (riskResult.analysis.recommendations) {
+        llmRecommendations.push(...riskResult.analysis.recommendations.slice(0, 3));
+      }
+      if (riskResult.analysis.healthScore !== undefined) {
+        llmAnalysis = { ...llmAnalysis, healthScore: riskResult.analysis.healthScore };
+      }
+    }
   }
 
   const baseActions = verdict === 'PASS'

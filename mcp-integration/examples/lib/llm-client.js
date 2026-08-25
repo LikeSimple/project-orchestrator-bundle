@@ -608,6 +608,400 @@ ${checklist.map(c => `- ${c}`).join('\n')}
 }
 
 // ============================================================
+// 便捷方法：生成提交信息
+// ============================================================
+
+async function generateCommitMessage({
+  diff = '',
+  stagedFiles = [],
+  convention = 'conventional',
+  language = 'en',
+} = {}) {
+  const system = `You are an expert software engineer who writes concise, meaningful git commit messages.
+
+Rules:
+1. Follow ${convention} commit convention (type(scope): subject)
+2. Subject line max 72 characters
+3. Body explains WHAT and WHY, not HOW
+4. Use imperative mood ("add", "fix", "refactor")
+5. Language: ${language}
+6. Output ONLY the commit message, no explanation`;
+
+  let userMsg = `Generate a commit message for the following changes:
+
+## Staged Files
+${stagedFiles.length > 0 ? stagedFiles.map(f => `- ${f}`).join('\n') : '(see diff)'}
+
+## Diff (truncated to 3000 chars)
+\`\`\`diff
+${diff.slice(0, 3000)}
+\`\`\`
+
+Output the commit message:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 512,
+  });
+
+  if (!result.ok) return result;
+
+  let message = result.content.trim();
+  const fenceMatch = message.match(/```[a-z]*\s*\n([\s\S]*?)\n```/);
+  if (fenceMatch) message = fenceMatch[1].trim();
+
+  return { ...result, message };
+}
+
+// ============================================================
+// 便捷方法：分析代码模式
+// ============================================================
+
+async function analyzeCodePatterns({
+  code = '',
+  filePath = '',
+  framework = '',
+  existingPatterns = [],
+} = {}) {
+  const system = `You are a software architect specializing in design pattern identification.
+
+Analyze the given code and identify which design patterns are used or could be applied.
+
+Output format (JSON):
+{
+  "detected": [
+    {"pattern": "PatternName", "location": "line or function", "confidence": 0.0-1.0, "evidence": "why"}
+  ],
+  "suggested": [
+    {"pattern": "PatternName", "reason": "why it fits", "benefit": "what improves", "priority": "high|medium|low"}
+  ],
+  "summary": "one-line code structure assessment"
+}`;
+
+  let userMsg = `Analyze this code for design patterns:
+
+## File
+${filePath || '(unnamed)'}
+
+## Framework
+${framework || '(unspecified)'}
+
+## Existing Patterns Applied
+${existingPatterns.length > 0 ? existingPatterns.map(p => `- ${p}`).join('\n') : '(none)'}
+
+## Code
+\`\`\`
+${code.slice(0, 4000)}
+\`\`\`
+
+Output JSON:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 2048,
+  });
+
+  if (!result.ok) return result;
+
+  let analysis;
+  try {
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    analysis = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
+  } catch {
+    analysis = {
+      detected: [],
+      suggested: [],
+      summary: 'Failed to parse LLM response as JSON',
+      raw: result.content,
+    };
+  }
+
+  return { ...result, analysis };
+}
+
+// ============================================================
+// 便捷方法：安全审计分析
+// ============================================================
+
+async function analyzeSecurity({
+  code = '',
+  filePath = '',
+  fileType = 'javascript',
+  astFindings = [],
+  checklist = [],
+} = {}) {
+  const system = `You are a senior security engineer performing code-level security audits.
+
+Focus areas: OWASP Top 10, hardcoded secrets, injection risks, XSS, auth bypass, insecure deserialization.
+
+Output format (JSON):
+{
+  "score": 0-100,
+  "findings": [
+    {"severity": "critical|high|medium|low|info", "type": "CWE-xxx or category", "line": "line number or range", "description": "what's wrong", "remediation": "how to fix", "confidence": 0.0-1.0}
+  ],
+  "summary": "one-line security assessment"
+}`;
+
+  let userMsg = `Perform a security audit on this code:
+
+## File
+${filePath || '(unnamed)'} (${fileType})
+
+## AST-Based Findings (pre-detected)
+${astFindings.length > 0 ? astFindings.map(f => `- [${f.type || 'issue'}] Line ${f.line || '?'}: ${f.description || f.message || JSON.stringify(f)}`).join('\n') : '(none)'}
+
+## Security Checklist
+${checklist.length > 0 ? checklist.map(c => `- ${c}`).join('\n') : '(standard OWASP checks)'}
+
+## Code
+\`\`\`${fileType}
+${code.slice(0, 4000)}
+\`\`\`
+
+Output JSON:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 2048,
+  });
+
+  if (!result.ok) return result;
+
+  let audit;
+  try {
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    audit = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
+  } catch {
+    audit = {
+      score: 50,
+      findings: [],
+      summary: 'Failed to parse LLM response as JSON',
+      raw: result.content,
+    };
+  }
+
+  return { ...result, audit };
+}
+
+// ============================================================
+// 便捷方法：依赖风险评估
+// ============================================================
+
+async function analyzeDependencyRisk({
+  dependencies = [],
+  devDependencies = [],
+  auditData = null,
+  outdated = [],
+  projectType = '',
+} = {}) {
+  const system = `You are a dependency management expert and supply chain security analyst.
+
+Analyze project dependencies for: security risks, license issues, maintenance status, version risks, unnecessary deps.
+
+Output format (JSON):
+{
+  "healthScore": 0-100,
+  "risks": [
+    {"package": "name", "severity": "critical|high|medium|low", "category": "security|license|maintenance|version|bloat", "description": "what's risky", "recommendation": "action to take"}
+  ],
+  "recommendations": ["prioritized action items"],
+  "summary": "one-line dependency health assessment"
+}`;
+
+  let userMsg = `Analyze the dependency health of this project:
+
+## Project Type
+${projectType || '(unspecified)'}
+
+## Dependencies (${dependencies.length})
+${dependencies.map(d => `- ${d.name || d}@${d.version || '?'}`).join('\n')}
+
+## Dev Dependencies (${devDependencies.length})
+${devDependencies.map(d => `- ${d.name || d}@${d.version || '?'}`).join('\n')}
+
+## npm audit Results
+${auditData ? JSON.stringify(auditData, null, 2).slice(0, 2000) : '(not available)'}
+
+## Outdated Packages
+${outdated.length > 0 ? outdated.map(o => `- ${o.name || o}: ${o.current || '?'} -> ${o.latest || '?'}`).join('\n') : '(none)'}
+
+Output JSON:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 2048,
+  });
+
+  if (!result.ok) return result;
+
+  let analysis;
+  try {
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    analysis = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
+  } catch {
+    analysis = {
+      healthScore: 50,
+      risks: [],
+      recommendations: [],
+      summary: 'Failed to parse LLM response as JSON',
+      raw: result.content,
+    };
+  }
+
+  return { ...result, analysis };
+}
+
+// ============================================================
+// 便捷方法：生成文档
+// ============================================================
+
+async function generateDocument({
+  type = 'readme',
+  projectName = '',
+  description = '',
+  techStack = [],
+  features = [],
+  apiEndpoints = [],
+  additionalContext = '',
+  language = 'en',
+} = {}) {
+  const docTypes = {
+    readme: 'README.md',
+    contributing: 'CONTRIBUTING.md',
+    changelog: 'CHANGELOG.md',
+    architecture: 'ARCHITECTURE.md',
+  };
+
+  const system = `You are a technical writer creating professional ${docTypes[type] || type} documentation.
+
+Rules:
+1. Write in ${language}
+2. Use clear Markdown formatting with headers, lists, code blocks
+3. Be concise but complete
+4. Include practical examples where relevant
+5. Output ONLY the document content, no meta-commentary`;
+
+  let userMsg = `Generate a ${docTypes[type] || type} for this project:
+
+## Project Name
+${projectName || '(unnamed)'}
+
+## Description
+${description || '(no description provided)'}
+
+## Tech Stack
+${techStack.length > 0 ? techStack.map(t => `- ${t}`).join('\n') : '(unspecified)'}
+
+## Features
+${features.length > 0 ? features.map(f => `- ${f}`).join('\n') : '(none listed)'}
+
+## API Endpoints
+${apiEndpoints.length > 0 ? apiEndpoints.map(e => `- ${e.method || 'GET'} ${e.path || e} - ${e.description || ''}`).join('\n') : '(none)'}
+
+${additionalContext ? `## Additional Context\n${additionalContext}` : ''}
+
+Output the document:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.3,
+    maxTokens: 4096,
+  });
+
+  if (!result.ok) return result;
+
+  let content = result.content.trim();
+  const fenceMatch = content.match(/```(?:markdown|md)?\s*\n([\s\S]*?)\n```/);
+  if (fenceMatch) content = fenceMatch[1].trim();
+
+  return { ...result, document: content };
+}
+
+// ============================================================
+// 便捷方法：环境配置安全分析
+// ============================================================
+
+async function analyzeEnvSecurity({
+  envVars = {},
+  sensitiveKeys = [],
+  fileContents = '',
+  astFindings = [],
+  env = 'dev',
+} = {}) {
+  const system = `You are a DevSecOps engineer specializing in environment configuration security.
+
+Analyze for: hardcoded secrets, missing encryption, insecure defaults, permission issues, secret rotation needs.
+
+Output format (JSON):
+{
+  "score": 0-100,
+  "issues": [
+    {"severity": "critical|high|medium|low", "type": "hardcoded-secret|insecure-default|permission|rotation|missing", "key": "env var name", "description": "what's wrong", "remediation": "how to fix"}
+  ],
+  "recommendations": ["prioritized action items"],
+  "summary": "one-line env security assessment"
+}`;
+
+  const maskedVars = Object.entries(envVars).reduce((acc, [k, v]) => {
+    acc[k] = sensitiveKeys.includes(k) ? '***MASKED***' : v;
+    return acc;
+  }, {});
+
+  let userMsg = `Analyze environment configuration security:
+
+## Environment
+${env}
+
+## Environment Variables (sensitive values masked)
+${Object.entries(maskedVars).map(([k, v]) => `- ${k}=${v}`).join('\n') || '(none)'}
+
+## AST-Based Findings
+${astFindings.length > 0 ? astFindings.map(f => `- [${f.type}] ${f.key || ''}: ${f.description || f.message || ''}`).join('\n') : '(none)'}
+
+## .env File Content (sensitive values masked)
+\`\`\`
+${fileContents.slice(0, 2000)}
+\`\`\`
+
+Output JSON:`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: 'user', content: userMsg }],
+    temperature: 0.1,
+    maxTokens: 2048,
+  });
+
+  if (!result.ok) return result;
+
+  let analysis;
+  try {
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    analysis = JSON.parse(jsonMatch ? jsonMatch[0] : result.content);
+  } catch {
+    analysis = {
+      score: 50,
+      issues: [],
+      recommendations: [],
+      summary: 'Failed to parse LLM response as JSON',
+      raw: result.content,
+    };
+  }
+
+  return { ...result, analysis };
+}
+
+// ============================================================
 // 工具：检查是否有可用的 LLM
 // ============================================================
 
@@ -630,6 +1024,12 @@ module.exports = {
   generateCode,
   generateTests,
   reviewCode,
+  generateCommitMessage,
+  analyzeCodePatterns,
+  analyzeSecurity,
+  analyzeDependencyRisk,
+  generateDocument,
+  analyzeEnvSecurity,
   isAvailable,
   getProviderName,
   detectProvider,

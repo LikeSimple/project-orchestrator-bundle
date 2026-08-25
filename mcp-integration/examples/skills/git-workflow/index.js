@@ -147,6 +147,25 @@ ${diffContent ? 'Diff 内容（已暂存）：\n```diff\n' + diffContent + '\n``
             if (storyId) fullMessage += `Story: ${storyId}\n`;
           }
           if (signoff) fullMessage += '\nCo-authored-by: AI Agent <agent@project-orchestrator.local>';
+        } else {
+          // 结构化 JSON 解析失败，使用 generateCommitMessage 作为降级方案
+          const fallbackResult = await llm.generateCommitMessage({
+            diff: diffContent,
+            stagedFiles: files,
+            convention: 'conventional',
+            language: 'en',
+          });
+
+          if (fallbackResult.ok && fallbackResult.message) {
+            llmEnhanced = true;
+            fullMessage = fallbackResult.message;
+            if (taskId || storyId) {
+              if (!fullMessage.includes('\n\n')) fullMessage += '\n\n';
+              if (taskId) fullMessage += `Task: ${taskId}\n`;
+              if (storyId) fullMessage += `Story: ${storyId}\n`;
+            }
+            if (signoff) fullMessage += '\nCo-authored-by: AI Agent <agent@project-orchestrator.local>';
+          }
         }
       }
     } catch {
