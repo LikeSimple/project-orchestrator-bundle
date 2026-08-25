@@ -37,6 +37,27 @@
 | 14 | dependency-auditor | P3 | 真实 npm audit + License + 健康度 | 9 | ✅ |
 | 15 | environment-manager | P3 | 4 环境 + Secrets 管理（dotenv / Doppler / Vault） | 10 | ✅ |
 
+### 关于 MCP 和 Skill Bundle
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 是 AI Agent 与外部工具通信的开放标准。**Skill Bundle** 是一组遵循 MCP 规范的工具集合，以薄编排层分发任务到多个专职子 Skill——每个子 Skill 独立可调用、独立可上架。
+
+本 Bundle 需要一个支持 MCP 的客户端（如 TRAE / Claude Code / Cursor）来加载和调用。加载后，15 个子 Skill 会作为 MCP Tool 暴露给 Agent，Agent 按需自动调用。
+
+## 前置条件
+
+| 依赖 | 版本 | 必须？ | 说明 |
+|---|---|---|---|
+| **Node.js** | 18+ | ✅ 必须 | 唯一硬依赖 |
+| **MCP 客户端** | — | ✅ 必须 | TRAE / Claude Code / Cursor 任选其一 |
+| Git | — | ⚠️ 可选 | git-workflow / openspec-workflow 需要 |
+| npm | — | ⚠️ 可选 | 构建和安装依赖需要 |
+| LLM API Key | — | ⚠️ 可选 | 无则降级到模板模式（`llmEnhanced: false`） |
+| GitHub CLI (gh) | — | ⚠️ 可选 | git-workflow 的 pr / release 需要 |
+| Doppler CLI | — | ⚠️ 可选 | environment-manager 的 `backend=doppler` 需要 |
+| Vault CLI | — | ⚠️ 可选 | environment-manager 的 `backend=vault` 需要 |
+
+> 没有可选依赖时，对应 Skill 会自动降级或跳过，不影响其他 Skill 使用。
+
 ## 快速开始
 
 ### 选择 Bundle
@@ -88,7 +109,7 @@ cd mcp-integration && ./quickstart.sh
 # 用户: "把首页卡片从 3 列改成 2 列，配色换成莫兰迪"
 
 # HTML 转组件代码
-/project-orchestrator.html-convert --from=prototype/index.html --target=react
+/project-orchestrator.html-converter --from=prototype/index.html --target=react
 ```
 
 ### 命令行直接调用
@@ -181,6 +202,8 @@ project-orchestrator-bundle/
 
 ## 构建与开发
 
+本项目使用 [npm workspaces](https://docs.npmjs.com/cli/v10/using-npm/workspaces)，根 `package.json` 的 `workspaces: ["mcp-integration"]` 会自动链接子工作区。在根目录执行 `npm install` 会同时安装 `mcp-integration` 的依赖。
+
 ```bash
 cd mcp-integration
 
@@ -204,19 +227,58 @@ npm start
 
 ### 环境变量
 
-复制 `.env.example` 为 `.env` 并按需修改。LLM API Key 为**可选**——不配置时自动降级到模板生成模式（`data.llmEnhanced: false`）。
+复制 `.env.example` 为 `.env.local` 并按需修改（`.env.local` 已被 `.gitignore` 排除，不会提交）。LLM API Key 为**可选**——不配置时自动降级到模板生成模式（`data.llmEnhanced: false`）。
+
+**应用**
 
 | 变量 | 说明 | 必须？ |
 |---|---|---|
-| `NODE_ENV` | 运行环境（development / production） | ✅ |
+| `NODE_ENV` | 运行环境（development / test / staging / production） | ✅ |
 | `APP_PORT` | 应用端口 | ✅ |
-| `ANTHROPIC_API_KEY` | Anthropic Claude API Key | ⚠️ 可选 |
-| `OPENAI_API_KEY` | OpenAI API Key | ⚠️ 可选 |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key | ⚠️ 可选 |
-| `DASHSCOPE_API_KEY` | 通义千问 API Key | ⚠️ 可选 |
-| `MOONSHOT_API_KEY` | 月之暗面 API Key | ⚠️ 可选 |
-| `LLM_API_KEY` + `LLM_BASE_URL` | 自定义 OpenAI 兼容端点 | ⚠️ 可选 |
-| `MCP_SAMPLING_ENABLED` | 设为 `1` 启用 MCP Sampling（首选，零配置） | ⚠️ 可选 |
+| `APP_URL` | 应用访问地址 | ✅ |
+
+**数据库 & 认证**
+
+| 变量 | 说明 | 必须？ |
+|---|---|---|
+| `DATABASE_URL` | 数据库连接字符串 | ⚠️ 按需 |
+| `JWT_SECRET` | JWT 签名密钥（32+ 随机字符） | ⚠️ 按需 |
+| `JWT_EXPIRES_IN` | JWT 过期时间（如 2h） | ⚠️ 按需 |
+
+**第三方 API**
+
+| 变量 | 说明 | 必须？ |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | Stripe 支付密钥 | ⚠️ 按需 |
+| `STRIPE_WEBHOOK_SECRET` | Stripe Webhook 签名密钥 | ⚠️ 按需 |
+
+**AWS**
+
+| 变量 | 说明 | 必须？ |
+|---|---|---|
+| `AWS_REGION` | AWS 区域 | ⚠️ 按需 |
+| `AWS_ACCESS_KEY_ID` | AWS 访问密钥 ID | ⚠️ 按需 |
+| `AWS_SECRET_ACCESS_KEY` | AWS 访问密钥 | ⚠️ 按需 |
+
+**监控**
+
+| 变量 | 说明 | 必须？ |
+|---|---|---|
+| `SENTRY_DSN` | Sentry 错误监控数据源 | ⚠️ 可选 |
+
+**LLM 集成（全部可选，优先级：MCP Sampling > 直连 Provider > 模板降级）**
+
+| 变量 | 说明 |
+|---|---|
+| `MCP_SAMPLING_ENABLED` | 设为 `1` 启用 MCP Sampling（首选，零配置） |
+| `LLM_PROVIDER` | 显式指定 Provider（anthropic / openai / deepseek / qwen / moonshot / custom） |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API Key |
+| `OPENAI_API_KEY` | OpenAI API Key |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key |
+| `DASHSCOPE_API_KEY` | 通义千问 API Key |
+| `MOONSHOT_API_KEY` | 月之暗面 API Key |
+| `LLM_API_KEY` + `LLM_BASE_URL` | 自定义 OpenAI 兼容端点（Provider 为 `custom` 时使用） |
+| `LLM_MODEL` | 自定义模型名称（配合 `LLM_API_KEY` + `LLM_BASE_URL` 使用） |
 
 > 完整环境配置指南详见 [docs/env-setup.md](docs/env-setup.md)。
 
@@ -552,6 +614,16 @@ Bundle **不依赖 SpecKit 或 OpenSpec CLI 工具**。它借鉴了这两个工�
 - ✅ 测试断言加固（30 个弱断言升级为深度数据字段断言）
 - ✅ Windows 兼容性（`spawnSync` + `shell: true` 修复 stdout pipe 问题）
 - ✅ MCP Sampling 全链路（LLM 请求复用 Agent 框架 LLM）
+
+### 路线图（剩余 4%）
+
+| 优先级 | 待办 | 说明 |
+|---|---|---|
+| P3 | 编排状态机 | 主 Skill 自动串联 Phase 1 → 2 → 3，无需手动逐个调用 |
+| — | 真实 macOS / Linux 手动验证 | CI 之外的多平台端到端测试 |
+| — | Marketplace 上架 | 文档、示例、视频教程 |
+| — | 性能优化 | 大型项目（1000+ 文件）的响应时间优化 |
+| — | 多语言 / i18n | Skill 输出多语言支持 |
 
 ## 许可
 
