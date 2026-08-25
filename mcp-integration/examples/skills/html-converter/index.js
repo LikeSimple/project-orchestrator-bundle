@@ -282,8 +282,10 @@ async function convertWithLLM(htmlContent, framework, componentName, typescript)
     const frameworkLabel = framework === 'vue3' ? 'Vue 3 SFC (Composition API + <script setup>)' : 'React Function Component';
     const langLabel = typescript ? 'TypeScript' : 'JavaScript';
 
-    const result = await llm.callLLM({
-      system: `你是资深前端架构师，精通 ${frameworkLabel} 和 ${langLabel}。
+    const result = await llm.generateCode({
+      taskDescription: `将 HTML 原型转换为 ${frameworkLabel} 组件`,
+      language: typescript ? 'typescript' : 'javascript',
+      customSystem: `你是资深前端架构师，精通 ${frameworkLabel} 和 ${langLabel}。
 你的任务是将 HTML 原型转换为高质量、生产级别的组件代码。
 
 转换原则：
@@ -300,43 +302,11 @@ async function convertWithLLM(htmlContent, framework, componentName, typescript)
 3. 包含必要的类型定义、props 接口、事件定义
 4. 样式使用 scoped CSS（Vue）或 className（React）
 5. 合理使用组合式 API / Hooks`,
-      messages: [{
-        role: 'user',
-        content: `## 组件名称
-${componentName}
-
-## 目标框架
-${frameworkLabel} + ${langLabel}
-
-## 原始 HTML
-\`\`\`html
-${htmlContent.slice(0, 8000)}
-\`\`\`
-
-## 转换要求
-${framework === 'vue3' ? `- 使用 Vue 3 Composition API + <script setup> 语法
-- 使用 TypeScript 类型定义 props 和 emits
-- 样式使用 <style scoped>
-- 保留所有 class 名称
-- 合理提取 props，使组件可配置` : `- 使用 React Function Component
-- 使用 TypeScript 接口定义 props
-- class → className 转换
-- 保留所有样式类名
-- 合理提取 props，使组件可配置`}
-
-请直接输出完整的组件代码文件内容：`,
-      }],
-      temperature: 0.3,
-      maxTokens: 8192,
+      additionalContext: `## 组件名称\n${componentName}\n\n## 目标框架\n${frameworkLabel} + ${langLabel}\n\n## 原始 HTML\n\`\`\`html\n${htmlContent.slice(0, 8000)}\n\`\`\`\n\n## 转换要求\n${framework === 'vue3' ? `- 使用 Vue 3 Composition API + <script setup> 语法\n- 使用 TypeScript 类型定义 props 和 emits\n- 样式使用 <style scoped>\n- 保留所有 class 名称\n- 合理提取 props，使组件可配置` : `- 使用 React Function Component\n- 使用 TypeScript 接口定义 props\n- class → className 转换\n- 保留所有样式类名\n- 合理提取 props，使组件可配置`}\n\n请直接输出完整的组件代码文件内容：`,
     });
 
-    if (result.ok) {
-      let code = result.content.trim();
-      const fenceMatch = code.match(/```(?:\w+)?\s*\n([\s\S]*?)\n```/);
-      if (fenceMatch) code = fenceMatch[1].trim();
-      if (code.length >= 50) {
-        return { code, provider: result.provider };
-      }
+    if (result.ok && result.code && result.code.length >= 50) {
+      return { code: result.code, provider: result.provider };
     }
   } catch { /* 静默回退 */ }
   return null;
@@ -401,8 +371,10 @@ async function typesWithLLM(htmlContent) {
   if (!llm.isAvailable()) return null;
 
   try {
-    const result = await llm.callLLM({
-      system: `你是 TypeScript 专家，从 HTML 中识别表单字段和数据展示字段，生成完整的 TypeScript interface。
+    const result = await llm.generateCode({
+      taskDescription: '从 HTML 中识别表单字段和数据展示字段，生成完整的 TypeScript interface',
+      language: 'typescript',
+      customSystem: `你是 TypeScript 专家，从 HTML 中识别表单字段和数据展示字段，生成完整的 TypeScript interface。
 
 要求：
 1. 识别所有 input、select、textarea 等表单元素
@@ -411,27 +383,11 @@ async function typesWithLLM(htmlContent) {
 4. 标记必填/可选
 5. 添加 JSDoc 注释
 6. 只输出 TypeScript 代码，不要解释，不要 markdown 代码块标记`,
-      messages: [{
-        role: 'user',
-        content: `## HTML 原型
-\`\`\`html
-${extractBody(htmlContent).slice(0, 6000)}
-\`\`\`
-
-请生成完整的 TypeScript interface 文件，包含：
-1. 表单数据接口（FormData）
-2. 数据展示接口（如果有）
-3. 相关的枚举类型
-4. 工具类型（Partial, Required 等）`,
-      }],
-      temperature: 0.2,
-      maxTokens: 4096,
+      additionalContext: `## HTML 原型\n\`\`\`html\n${extractBody(htmlContent).slice(0, 6000)}\n\`\`\`\n\n请生成完整的 TypeScript interface 文件，包含：\n1. 表单数据接口（FormData）\n2. 数据展示接口（如果有）\n3. 相关的枚举类型\n4. 工具类型（Partial, Required 等）`,
     });
 
-    if (result.ok) {
-      let code = result.content.trim();
-      const fenceMatch = code.match(/```(?:typescript|ts)?\s*\n([\s\S]*?)\n```/i);
-      if (fenceMatch) code = fenceMatch[1].trim();
+    if (result.ok && result.code) {
+      const code = result.code;
       if (code.length >= 50 && code.includes('interface')) {
         // 验证 LLM 生成的 TS 代码语法
         const validation = ast.validateTSInterface(code);

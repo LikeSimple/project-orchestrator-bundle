@@ -409,8 +409,9 @@ async function generateCode({
   targetFile = '',
   language = 'typescript',
   additionalContext = '',
+  customSystem = '',
 } = {}) {
-  const system = `你是一个资深软件工程师，负责编写高质量的生产级代码。
+  const defaultSystem = `你是一个资深软件工程师，负责编写高质量的生产级代码。
 
 输出要求：
 1. 只输出代码，不要解释，不要 markdown 代码块标记，不要前后缀说明
@@ -418,6 +419,8 @@ async function generateCode({
 3. 遵循用户提供的代码规范和最佳实践
 4. 包含必要的错误处理、类型定义和注释
 5. 严格遵循代码规范中的命名约定、文件结构和设计模式`;
+
+  const system = customSystem || defaultSystem;
 
   let userMsg = `请实现以下任务的代码：
 
@@ -873,6 +876,7 @@ async function generateDocument({
   apiEndpoints = [],
   additionalContext = '',
   language = 'en',
+  customSystem = '',
 } = {}) {
   const docTypes = {
     readme: 'README.md',
@@ -881,7 +885,7 @@ async function generateDocument({
     architecture: 'ARCHITECTURE.md',
   };
 
-  const system = `You are a technical writer creating professional ${docTypes[type] || type} documentation.
+  const defaultSystem = `You are a technical writer creating professional ${docTypes[type] || type} documentation.
 
 Rules:
 1. Write in ${language}
@@ -889,6 +893,8 @@ Rules:
 3. Be concise but complete
 4. Include practical examples where relevant
 5. Output ONLY the document content, no meta-commentary`;
+
+  const system = customSystem || defaultSystem;
 
   let userMsg = `Generate a ${docTypes[type] || type} for this project:
 

@@ -443,6 +443,18 @@
       "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787673245354-vxp7kb\\app.log",
       "errorCount": 2,
       "timestamp": "2026-08-25T15:54:05.361Z"
+    },
+    {
+      "type": "trace",
+      "errorMessage": "",
+      "frameCount": 3,
+      "timestamp": "2026-08-25T16:12:31.040Z"
+    },
+    {
+      "type": "logs",
+      "logFile": "C:\\Users\\chengan\\AppData\\Local\\Temp\\po-test-1787674351043-ai7lwm\\app.log",
+      "errorCount": 2,
+      "timestamp": "2026-08-25T16:12:31.051Z"
     }
   ]
 }

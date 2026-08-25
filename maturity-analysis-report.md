@@ -262,7 +262,7 @@ v6 已完成全量同步，v7 无文档变更。
 |---|---|---|---|---|---|
 | 3-7 | ~~npm audit / Doppler/Vault / 弱断言 / schema / E2E~~ | 已修复 | 保持 | — | ~~P1~~ 已解决 |
 | 8 | **缺少 pipeline 断点恢复** | 新发现 | 保持 | implement 阶段失败后需从头重来 | P2 |
-| 9 | **7/15 Skill LLM 未结构化** | — | 新发现 | 有 callLLM 但 prompt 通用，结果解析粗糙 | P2 |
+| 9 | ~~**7/15 Skill LLM 未结构化**~~ | — | ~~新发现~~ | ~~有 callLLM 但 prompt 通用~~ | ~~P2~~ ✅ v8 全量迁移：15/15 Skill 使用结构化方法，残留 14 个 callLLM 均为特定 JSON 格式 + 正确解析 + 错误处理 |
 
 ### 🟢 低风险 / 优化项
 
@@ -289,7 +289,7 @@ v6→v7 的核心进步：
 4. **Phase 3 从中期到后期** — 距离 Phase 4 仅差 pipeline 恢复 + 7 个 Skill LLM 结构化 + 性能基线
 
 **距离 Phase 4（生产就绪）的主要差距**：
-1. ~~LLM 深度集成~~ → 8/15 已完成，7/15 有 LLM 但未结构化（从 P1 降为 P2）
+1. ~~LLM 深度集成~~ → ✅ 15/15 全量深度集成（v8 完成）
 2. pipeline 断点恢复机制
 3. 性能基线数据
 4. 真实 macOS/Linux 手动验证
@@ -314,7 +314,7 @@ v6→v7 的核心进步：
 
 | # | 任务 | 预期效果 | 优先级 |
 |---|---|---|---|
-| 8 | **7 个 Skill LLM 结构化** | spec-bootstrap/scaffold-runner/api-contract/html-converter/openspec/test-runner/debug-helper 使用专用方法 | P2 |
+| 8 | ~~**7 个 Skill LLM 结构化**~~ | ~~spec-bootstrap/scaffold-runner/api-contract/html-converter/openspec/test-runner/debug-helper 使用专用方法~~ | ~~P2~~ ✅ v8 完成 |
 | 9 | **pipeline 断点恢复** | implement-executor 增 `resume` 命令 | P2 |
 | 10 | **性能基线测试** | 测量各 Skill 执行时间/LLM 延迟 | P3 |
 | 11 | **编排状态机** | 主 Skill 自动串联 Phase 1→2→3 | P3 |

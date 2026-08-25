@@ -375,11 +375,12 @@ ${generateAcceptanceScenarios(s.title).map(a => `1. ${a}`).join('\n')}
     storiesSection
   );
 
-  // LLM 增强：生成更丰富的 User Story、Acceptance Criteria、非功能性需求
+  // 结构化 LLM 增强：使用 generateDocument 生成 spec.md
   if (llm.isAvailable()) {
     try {
-      const llmResult = await llm.callLLM({
-        system: `你是一位资深产品经理，负责编写高质量的产品规格文档（spec.md）。
+      const llmResult = await llm.generateDocument({
+        type: 'specification',
+        customSystem: `你是一位资深产品经理，负责编写高质量的产品规格文档（spec.md）。
 
 你的任务是基于用户提供的功能描述，生成一份专业、完整、可执行的产品规格文档。
 
@@ -409,23 +410,13 @@ ${generateAcceptanceScenarios(s.title).map(a => `1. ${a}`).join('\n')}
 6. Success Criteria 必须是可度量的指标，编号为 SC-001、SC-002...
 
 7. 只输出 Markdown 文档内容，不要任何解释性文字`,
-        messages: [{
-          role: 'user',
-          content: `请基于以下用户描述，生成一份完整的产品规格文档（spec.md）：
-
-## 用户描述
-${description}
-
-## 当前模板生成的草稿（供参考，可大幅优化）
-${content}
-
-请输出优化后的完整 spec.md 内容：`
-        }],
-        temperature: 0.3,
-        maxTokens: 4096,
+        projectName: projectName || 'NewProject',
+        description: description.slice(0, 500),
+        additionalContext: `## 当前模板生成的草稿（供参考，可大幅优化）\n${content}\n\n请输出优化后的完整 spec.md 内容：`,
+        language: 'zh',
       });
-      if (llmResult.ok) {
-        content = llmResult.content.trim();
+      if (llmResult.ok && llmResult.document) {
+        content = llmResult.document;
       }
     } catch {
       // LLM 失败时静默回退到模板
@@ -640,11 +631,12 @@ async function plan({ projectRoot, specFile }) {
 `
   );
 
-  // LLM 增强：生成更详细的技术方案、架构设计、技术选型理由
+  // 结构化 LLM 增强：使用 generateDocument 生成 plan.md
   if (llm.isAvailable()) {
     try {
-      const llmResult = await llm.callLLM({
-        system: `你是一位资深架构师，负责基于产品规格文档（spec.md）生成详细的技术实现方案（plan.md）。
+      const llmResult = await llm.generateDocument({
+        type: 'implementation plan',
+        customSystem: `你是一位资深架构师，负责基于产品规格文档（spec.md）生成详细的技术实现方案（plan.md）。
 
 你的任务是分析 spec.md 中的需求，设计合理的技术架构，并给出详细的实现计划。
 
@@ -681,27 +673,13 @@ async function plan({ projectRoot, specFile }) {
    - 每个风险的缓解措施
 
 6. 只输出 Markdown 文档内容，不要任何解释性文字`,
-        messages: [{
-          role: 'user',
-          content: `请基于以下 spec.md 生成详细的技术实现计划（plan.md）：
-
-## spec.md 内容
-\`\`\`
-${specContent}
-\`\`\`
-
-## 当前模板生成的草稿（供参考，可大幅优化和扩展）
-\`\`\`
-${content}
-\`\`\`
-
-请输出优化后的完整 plan.md 内容：`
-        }],
-        temperature: 0.3,
-        maxTokens: 4096,
+        projectName: projectName || 'NewProject',
+        description: `spec.md 摘要: ${specContent.slice(0, 500)}`,
+        additionalContext: `## 当前模板生成的草稿（供参考，可大幅优化和扩展）\n${content}\n\n请输出优化后的完整 plan.md 内容：`,
+        language: 'zh',
       });
-      if (llmResult.ok) {
-        content = llmResult.content.trim();
+      if (llmResult.ok && llmResult.document) {
+        content = llmResult.document;
       }
     } catch {
       // LLM 失败时静默回退到模板
@@ -761,11 +739,12 @@ async function tasks({ projectRoot, planFile }) {
     );
   }
 
-  // LLM 增强：生成更细粒度、更准确的任务拆解
+  // 结构化 LLM 增强：使用 generateDocument 生成 tasks.md
   if (llm.isAvailable()) {
     try {
-      const llmResult = await llm.callLLM({
-        system: `你是一位资深技术项目经理，擅长将技术实现计划拆解为细粒度、可执行的开发任务。
+      const llmResult = await llm.generateDocument({
+        type: 'task list',
+        customSystem: `你是一位资深技术项目经理，擅长将技术实现计划拆解为细粒度、可执行的开发任务。
 
 你的任务是基于 plan.md 和 spec.md 的内容，生成一份按 Phase 组织的详细任务列表（tasks.md）。
 
@@ -812,27 +791,13 @@ async function tasks({ projectRoot, planFile }) {
 7. Dependencies & Execution Order 部分说明各 Phase 之间的依赖关系
 
 8. 只输出 Markdown 文档内容，不要任何解释性文字`,
-        messages: [{
-          role: 'user',
-          content: `请基于以下文档生成详细的任务列表（tasks.md）：
-
-## spec.md 内容
-\`\`\`
-${planContent}
-\`\`\`
-
-## 当前模板生成的草稿（供参考，可大幅优化和扩展）
-\`\`\`
-${content}
-\`\`\`
-
-请输出优化后的完整 tasks.md 内容：`
-        }],
-        temperature: 0.3,
-        maxTokens: 4096,
+        projectName: projectName || 'NewProject',
+        description: `plan.md 摘要: ${planContent.slice(0, 500)}`,
+        additionalContext: `## 当前模板生成的草稿（供参考，可大幅优化和扩展）\n${content}\n\n请输出优化后的完整 tasks.md 内容：`,
+        language: 'zh',
       });
-      if (llmResult.ok) {
-        content = llmResult.content.trim();
+      if (llmResult.ok && llmResult.document) {
+        content = llmResult.document;
       }
     } catch {
       // LLM 失败时静默回退到模板
@@ -894,11 +859,12 @@ async function checklist({ projectRoot, specFile }) {
 - [ ] CHK006 - 至少1个P1 Story可作为MVP独立交付
 `;
 
-  // LLM 增强：生成更全面的验收检查清单
+  // 结构化 LLM 增强：使用 generateDocument 生成 checklist
   if (llm.isAvailable()) {
     try {
-      const llmResult = await llm.callLLM({
-        system: `你是一位资深 QA 工程师，擅长为产品规格文档生成全面的质量验收检查清单。
+      const llmResult = await llm.generateDocument({
+        type: 'quality checklist',
+        customSystem: `你是一位资深 QA 工程师，擅长为产品规格文档生成全面的质量验收检查清单。
 
 你的任务是基于 spec.md 的内容，生成一份结构化的、可执行的质量检查清单（checklist）。
 
@@ -927,21 +893,13 @@ async function checklist({ projectRoot, specFile }) {
 4. 至少生成 20 个检查项，按类别分组
 
 5. 只输出 Markdown 文档内容，不要任何解释性文字`,
-        messages: [{
-          role: 'user',
-          content: `请基于以下 spec.md 生成全面的质量验收检查清单：
-
-\`\`\`
-${specContent}
-\`\`\`
-
-请输出完整的 checklist 内容：`
-        }],
-        temperature: 0.3,
-        maxTokens: 3072,
+        projectName: projectName || 'NewProject',
+        description: `spec.md 摘要: ${specContent.slice(0, 500)}`,
+        additionalContext: `请基于以上 spec.md 生成全面的质量验收检查清单。\n\n请输出完整的 checklist 内容：`,
+        language: 'zh',
       });
-      if (llmResult.ok) {
-        checklistContent = llmResult.content.trim();
+      if (llmResult.ok && llmResult.document) {
+        checklistContent = llmResult.document;
       }
     } catch {
       // LLM 失败时静默回退到模板
