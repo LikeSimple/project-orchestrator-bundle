@@ -303,6 +303,109 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     // ============ Phase 1: 项目初始化 ============
     {
+      name: 'spec_bootstrap_constitution',
+      description: 'spec-bootstrap.constitution — 建立项目宪法（治理原则 + 质量红线 + 技术规范）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectName: { type: 'string', default: 'NewProject', description: '项目名称' },
+          principles: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                description: { type: 'string' },
+              },
+              required: ['name'],
+            },
+            description: '核心原则列表，覆盖默认模板',
+          },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_specify',
+      description: 'spec-bootstrap.specify — 从需求描述生成首个 feature 的 spec.md',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', description: '功能需求描述（自然语言）' },
+        },
+        required: ['description'],
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_clarify',
+      description: 'spec-bootstrap.clarify — 扫描 spec.md 中的歧义点，最多列出 5 个待澄清问题',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          specFile: { type: 'string', default: 'specs/001-feature/spec.md', description: 'spec.md 路径（相对项目根）' },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_plan',
+      description: 'spec-bootstrap.plan — 基于 spec.md 生成技术方案 plan.md（架构 + 模块 + 数据流）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          specFile: { type: 'string', default: 'specs/001-feature/spec.md', description: 'spec.md 路径（相对项目根）' },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_checklist',
+      description: 'spec-bootstrap.checklist — 生成领域质量检查清单（质量门）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          specFile: { type: 'string', default: 'specs/001-feature/spec.md', description: 'spec.md 路径（相对项目根）' },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_tasks',
+      description: 'spec-bootstrap.tasks — 基于 plan.md 拆分为可执行任务列表 tasks.md',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planFile: { type: 'string', default: 'specs/001-feature/plan.md', description: 'plan.md 路径（相对项目根）' },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_analyze',
+      description: 'spec-bootstrap.analyze — 一致性扫描：检查 spec/plan/tasks 三者是否一致',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          feature: { type: 'string', default: '001-feature', description: 'feature 目录名' },
+        },
+      },
+    },
+
+    {
+      name: 'spec_bootstrap_implement',
+      description: 'spec-bootstrap.implement — 启动实现（调度到 implement-executor）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          taskId: { type: 'string', description: '任务 ID，如 T001' },
+          phase: { type: 'integer', description: 'Phase 编号' },
+        },
+        required: ['taskId'],
+      },
+    },
+
+    {
       name: 'scaffold_runner_run',
       description: 'scaffold-runner.run — 脚手架生成（17 种技术栈）',
       inputSchema: {
@@ -597,6 +700,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       // ============ Phase 1: 项目初始化 ============
+      case 'spec_bootstrap_constitution': {
+        const result = await callSkill('spec-bootstrap', 'constitution', {
+          projectName: args.projectName ?? 'NewProject',
+          principles: args.principles ?? [],
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_specify': {
+        const result = await callSkill('spec-bootstrap', 'specify', {
+          description: args.description,
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_clarify': {
+        const result = await callSkill('spec-bootstrap', 'clarify', {
+          specFile: args.specFile ?? 'specs/001-feature/spec.md',
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_plan': {
+        const result = await callSkill('spec-bootstrap', 'plan', {
+          specFile: args.specFile ?? 'specs/001-feature/spec.md',
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_checklist': {
+        const result = await callSkill('spec-bootstrap', 'checklist', {
+          specFile: args.specFile ?? 'specs/001-feature/spec.md',
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_tasks': {
+        const result = await callSkill('spec-bootstrap', 'tasks', {
+          planFile: args.planFile ?? 'specs/001-feature/plan.md',
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_analyze': {
+        const result = await callSkill('spec-bootstrap', 'analyze', {
+          feature: args.feature ?? '001-feature',
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
+      case 'spec_bootstrap_implement': {
+        const result = await callSkill('spec-bootstrap', 'implement', {
+          taskId: args.taskId,
+          phase: args.phase,
+          projectRoot: PROJECT_ROOT,
+        });
+        return formatSkillResult(result);
+      }
+
       case 'scaffold_runner_run': {
         const result = await callSkill('scaffold-runner', 'run', {
           stack: args.stack,
