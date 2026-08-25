@@ -35,6 +35,7 @@ set -u  # 未定义变量即停
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MCP_INTEGRATION_DIR="$SCRIPT_DIR"
+PROJECT_ROOT="$(dirname "$MCP_INTEGRATION_DIR")"
 PKG_JSON="$MCP_INTEGRATION_DIR/package.json"
 TS_CONFIG="$MCP_INTEGRATION_DIR/tsconfig.json"
 DIST_DIR="$MCP_INTEGRATION_DIR/dist"
@@ -285,7 +286,7 @@ configure_mcp() {
 
   case "$host" in
     trae)
-      config_path="${PROJECT_ROOT:-$(pwd)}/.trae/mcp.json"
+      config_path="$PROJECT_ROOT/.trae/mcp.json"
       ;;
     claude)
       config_path="$HOME/.claude.json"
@@ -294,7 +295,7 @@ configure_mcp() {
       config_path="$HOME/.cursor/mcp.json"
       ;;
     vscode)
-      config_path="${PROJECT_ROOT:-$(pwd)}/.vscode/mcp.json"
+      config_path="$PROJECT_ROOT/.vscode/mcp.json"
       ;;
   esac
 
@@ -312,7 +313,7 @@ configure_mcp() {
   fi
 
   # 读取已有配置并合并（使用 python 处理 JSON）
-  local project_root="${PROJECT_ROOT:-$(pwd)}"
+  local project_root="$PROJECT_ROOT"
   local new_server_json
   new_server_json=$(cat <<SERVER_EOF
 {
@@ -436,7 +437,7 @@ cat <<EOF
   MCP Host:     ${MCP_DISPLAY}
   Skill CLI:    $SKILL_CLI_DIST
   Orchestrator: $ORCHESTRATOR_DIST
-  Project Root: ${PROJECT_ROOT:-$(pwd)}
+  Project Root: $PROJECT_ROOT
 
 后续步骤：
   1. 重启 $MCP_HOST 以加载新配置
