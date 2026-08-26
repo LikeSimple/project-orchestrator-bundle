@@ -26,22 +26,21 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          cache-dependency-path: project-orchestrator-bundle/mcp-integration/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: project-orchestrator-bundle/mcp-integration
         run: npm ci
 
       - name: Type check
-        working-directory: project-orchestrator-bundle/mcp-integration
+        working-directory: mcp-integration
         run: npx tsc --noEmit
 
       - name: Build
-        working-directory: project-orchestrator-bundle/mcp-integration
+        working-directory: mcp-integration
         run: npm run build
 
       - name: Run tests
-        working-directory: project-orchestrator-bundle/mcp-integration
+        working-directory: mcp-integration
         run: npm test
         env:
           CI: true
@@ -51,5 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ github.sha }}
-          path: project-orchestrator-bundle/mcp-integration/dist/
+          path: mcp-integration/dist/
           retention-days: 7
