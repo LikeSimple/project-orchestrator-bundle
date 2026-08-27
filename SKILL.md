@@ -45,6 +45,14 @@ entry-points:
   - review
   - debug
   - env.check
+  # P2 · 健康度监控（运营可观测性）
+  - health.event
+  - health.check
+  - health.dashboard
+  # P2 · 编排状态机（自动串联 Phase 1→2→3）
+  - orchestrate.status
+  - orchestrate.next
+  - orchestrate.transition
 requires:
   - node: ">=18.0.0"
   - mcp: ">=2026-07-28"
@@ -67,6 +75,9 @@ binds:
   - review-checklist
   - dependency-auditor
   - environment-manager
+  # P2 · 共享库（lib，非 Skill，但纳入 binds 便于追踪）
+  - lib:health-monitor
+  - lib:orchestrator-state-machine
 ---
 
 # project-orchestrator
@@ -94,10 +105,10 @@ binds:
 
 ### 与单 Skill 方案的对比
 
-| 方案 | 复杂度 | 可复用性 | 权限隔离 | 故障隔离 |
+| 方案 | 复杂度管理 | 可复用性 | 权限隔离 | 故障隔离 |
 |---|---|---|---|---|
-| 单 Skill（巨石） | SKILL.md > 500 行 | 整体打包，无法单点复用 | 权限按最大公约数 | 一处挂全挂 |
-| **Skill Bundle（本方案）** | 每个 SKILL.md < 200 行 | 子 Skill 独立发布 | 按需最小化 | 局部失败不影响整体 |
+| 单 Skill（巨石） | 单一 SKILL.md > 500 行，**无分阶段拆分**，定位与维护困难 | 整体打包，无法单点复用 | 权限按最大公约数 | 一处挂全挂 |
+| **Skill Bundle（本方案）** | **按阶段 + 职责拆分 15 个独立子 SKILL.md**；单文档聚焦单一领域，父 Skill 只做分发不承载实现。核心薄编排逻辑 < 100 行，子 Skill 平均 ~300 行（含模板/示例/回退表），**单职责定位显著优于巨石** | 子 Skill 独立发布，可单独上架 Marketplace | 按需最小化，按 Skill 单独授权 | 局部失败不影响整体 |
 
 ---
 
@@ -230,6 +241,46 @@ mkdir my-project && cd my-project
 /project-orchestrator.env.check --validate=.env.example
 ```
 
+### 3.6 三套命名体系映射表
+
+本 Bundle 对外暴露三套命名体系，对应关系如下：
+
+- **MCP Tool 名（蛇形）**：MCP 客户端实际调用的 Tool 标识，共 26 个，由 `orchestrator-tools.ts` 注册。
+- **Entry-point（点号）**：父 Skill frontmatter 中声明的 14 个高层入口，每个 entry-point 对应 1+ 个 MCP Tool 串联执行。
+- **Slash 命令**：文档示例中面向用户的可读调用形式（客户端支持的 `/skill-name.command` 风格语法糖）。
+
+| Entry-point | Slash 命令（示例） | 对应 MCP Tool 名 | 所属子 Skill | 阶段 |
+|---|---|---|---|---|
+| `bootstrap` | `/project-orchestrator.bootstrap` | `spec_bootstrap_constitution` → `spec_bootstrap_specify` → `spec_bootstrap_clarify` → `spec_bootstrap_plan` → `spec_bootstrap_checklist` → `spec_bootstrap_tasks` → `spec_bootstrap_analyze` → `scaffold_runner_run` → `ui_design_adjust` → `spec_userstory_to_design_generate` → `api_contract_generate` | spec-bootstrap + scaffold-runner + ui-design + spec-userstory-to-design + api-contract | Phase 1 完整初始化 |
+| `scaffold` | `/project-orchestrator.scaffold-runner --stack=react-vite` | `scaffold_runner_run` | scaffold-runner | Phase 1 |
+| `design` | `/project-orchestrator.design --from=spec.md` | `spec_userstory_to_design_generate` | spec-userstory-to-design | Phase 1 |
+| `contract` | `/project-orchestrator.contract --from=plan.md` | `api_contract_generate` | api-contract | Phase 1 |
+| `ui.adjust` | `/project-orchestrator.ui-design --adjust="把卡片3列改成2列"` | `ui_design_adjust` | ui-design | Phase 1 |
+| `html.convert` | `/project-orchestrator.html-converter --from=prototype/index.html` | `html_converter_convert` | html-converter | Phase 1 |
+| — | 单独调用 spec-bootstrap 子命令 | `spec_bootstrap_constitution` / `spec_bootstrap_specify` / `spec_bootstrap_clarify` / `spec_bootstrap_plan` / `spec_bootstrap_checklist` / `spec_bootstrap_tasks` / `spec_bootstrap_analyze` / `spec_bootstrap_implement` | spec-bootstrap | Phase 1 |
+| — | 单独调用设计模式 | `code_patterns_generate` | code-patterns | Phase 1 |
+| `change` | `/project-orchestrator.change "新增工时统计功能"` | `openspec_workflow_propose` → `implement_executor_run` → `test_runner_run` → `git_workflow_commit` | openspec-workflow + implement-executor + test-runner + git-workflow | Phase 2 完整变更 |
+| `implement` | `/project-orchestrator.implement --task=T015` | `implement_executor_run` / `implement_executor_resume` / `implement_executor_status` / `implement_executor_rollback` | implement-executor | Phase 2 |
+| `test` | `/project-orchestrator.test --scope=unit --coverage=80` | `test_runner_run` | test-runner | Phase 2 |
+| `commit` | `/project-orchestrator.commit --feature="新增工时统计" --create-pr` | `git_workflow_commit` / `git_workflow_pr` | git-workflow | Phase 2 |
+| `debug` | `/project-orchestrator.debug --error="TypeError..."` | `debug_helper_analyze` | debug-helper | Phase 3 |
+| `review` | `/project-orchestrator.review --pr=123` | `review_checklist_review` | review-checklist | Phase 3 |
+| `audit` | `/project-orchestrator.audit --strict` | `dependency_auditor_audit` | dependency-auditor | Phase 3 |
+| `env.check` | `/project-orchestrator.env.check --validate=.env.example` | `environment_manager_inject` | environment-manager | Phase 3 |
+| `health.event` | `/project-orchestrator.health.event --type=rollback.exec --taskId=T001` | `health_monitor_record_event` | lib:health-monitor | P2 · 运营可观测性 |
+| `health.check` | `/project-orchestrator.health.check` | `health_monitor_check` | lib:health-monitor | P2 · 运营可观测性 |
+| `health.dashboard` | `/project-orchestrator.health.dashboard --format=markdown --weekly` | `health_monitor_dashboard` | lib:health-monitor | P2 · 运营可观测性 |
+| `orchestrate.status` | `/project-orchestrator.orchestrate.status` | `orchestrator_status` | lib:orchestrator-state-machine | P2 · 状态机 |
+| `orchestrate.next` | `/project-orchestrator.orchestrate.next --auto-advance` | `orchestrator_next` | lib:orchestrator-state-machine | P2 · 状态机 |
+| `orchestrate.transition` | `/project-orchestrator.orchestrate.transition --action=recompute` | `orchestrator_transition` | lib:orchestrator-state-machine | P2 · 状态机 |
+
+> **使用提示**：
+> - Agent / 自动化调用 → 使用 **MCP Tool 名**（蛇形），精确对应 **32 个 Tool**（v9 P2 新增 6 个：3 健康度 + 3 状态机）。
+> - 用户快速上手 → 使用 **Slash 命令** 或 **Entry-point**，一条命令串联多个 Tool。
+> - 父 Skill 的 `bootstrap` 与 `change` 两个复合 Entry-point 会自动执行完整阶段链路，不需要手动逐个调用 Tool。
+> - **编排状态机**（P2 · 新增）：`orchestrate.status` / `orchestrate.next` / `orchestrate.transition` 三条命令，基于约定文件系统做存在性推断，实现「Phase 1 → 2 → 3 自动串联 + 缺失前置提示 + 下一步推荐」闭环。推荐使用 `/project-orchestrator.orchestrate.next --auto-advance` 让 Agent 自动按顺序推进。
+> - **健康度监控**（P2 · 新增）：各 Skill 在执行关键动作时（任务开始、撤销、澄清、投诉、npm-outdated 扫描）可调用 `health.event` 写入事件；`health.check` 做阈值告警；`health.dashboard --weekly` 输出撤销率周报。对应 SKILL.md §8.3 的 4 项监控指标已全部落地。
+
 ---
 
 ## 四、子 Skill 接口契约
@@ -259,7 +310,10 @@ my-project/
 │   ├── pages/*.md
 │   └── openapi.yaml
 ├── contracts/openapi.yaml        ← api-contract 写入（最终契约）
-├── src/                          ← scaffold-runner 写入
+├── src/                          ← scaffold-runner 写入（单端项目）
+│                                  ※ 组合栈（如 react-vite+spring-boot）为 monorepo：
+│                                    apps/web/（前端）+ apps/api/（后端）
+│                                    + 根 package.json（workspaces）+ pnpm-workspace.yaml
 └── components/                   ← html-converter 写入
 ```
 
@@ -624,6 +678,120 @@ Skill Bundle 的 LLM 调用采用 **MCP Sampling 优先 + 直连 Provider 降级
 | 澄清次数/任务 | > 2.5 | 仪表盘 |
 | "改了但没生效"投诉 | > 10/周 | 告警 |
 | npm outdated 核心库 | > 3 个 | 启动迁移计划 |
+
+#### 8.3.1 实现落地（v9 · P2 已修复）
+
+上述 4 项指标已全部由 `lib:health-monitor` 模块实现（`mcp-integration/examples/lib/health-monitor.js`），并通过 3 个 MCP Tool 对外暴露：
+
+| MCP Tool | 作用 | 输出 |
+|---|---|---|
+| `health_monitor_record_event` | 记录事件（task.start / task.complete / clarify.issue / rollback.exec / complaint.effect / npm.outdated / custom） | 事件 ID + 时间戳 |
+| `health_monitor_check` | 滑窗 7 天 + 本周真实计算 4 项指标，触发阈值告警 | `{healthy, count, alerts[], metricsSummary}` |
+| `health_monitor_dashboard` | 生成仪表盘 | markdown / html / json；`--weekly` 输出撤销率周报 |
+
+**事件持久化**：`<projectRoot>/.orchestrator-health/events.ndjson`（追加写入）+ `metrics.json`（最新计算快照）。
+
+**集成点建议**：
+- `implement-executor.run/resume/rollback` → 任务开始/完成时写 `task.start`/`task.complete`；回滚时写 `rollback.exec`
+- `spec-bootstrap.clarify` → 发现歧义写 `clarify.issue`
+- `test-runner` 失败后投诉 → 写 `complaint.effect`
+- `dependency-auditor.audit/outdated` → 扫描后写 `npm.outdated`
+
+#### 8.4 编排状态机（v9 · P2 · 自动串联 Phase 1→2→3）
+
+主 Skill 的复合 Entry-point（`bootstrap` / `change`）已提供完整阶段链路，但需要用户手动触发。编排状态机把「从项目文件系统推断当前进度 + 检查前置 + 推荐下一步 + 阶段转移」自动化：
+
+| MCP Tool | 作用 |
+|---|---|
+| `orchestrator_status` | 查询当前状态：currentPhase / phaseProgress（%） / completedSteps / nextCandidates |
+| `orchestrator_next` | 推荐下一步：recommended + missingPreconditions + nextActions；`autoAdvance=true` 输出"应执行的 MCP Tool"给 Agent 循环消费 |
+| `orchestrator_transition` | 人工转移：`mark_phase_done` / `rollback_phase` / `reset` / `recompute`（基于文件系统重算进度） |
+
+**状态持久化**：`<projectRoot>/.orchestrator-sm/state.json`。
+
+**19 步检查点**（基于 SKILL.md §4.1 约定路径的存在性推断）：
+- Phase 1（11 步）：constitution → specify → clarify → plan → checklist → tasks → scaffold → ui-design → design → contract → html-convert
+- Phase 2（4 步）：openspec → implement → test → commit
+- Phase 3（3 步，按需）：review → audit → env
+
+**典型用法**：
+```
+1. /project-orchestrator.orchestrate.transition --action=recompute   # 首次：基于现有文件系统推断已完成的步骤
+2. /project-orchestrator.orchestrate.next --auto-advance              # 重复调用：每步推荐唯一可执行 MCP Tool，Agent 调用后再次 next，直到达 Phase 3 完成
+3. /project-orchestrator.health.dashboard --weekly                    # 周报/仪表盘：持续观察运营健康
+```
+
+### 8.5 扩展：注册新 Skill（三件套）
+
+新增一个子 Skill 并接入编排状态机，需要完成「stateDef + 实现 + SKILL.md」三件套（+ 可选 MCP Tool 注册）。
+
+#### 步骤 1 · 状态机 step 定义（stateDef）
+
+编辑 [orchestrator-state-machine.js](file:///d:/TraeWork/88-Project/project-orchestrator-bundle/mcp-integration/examples/lib/orchestrator-state-machine.js) 的 `getStepDefinitions()`，按现有 19 步格式追加：
+
+```js
+{
+  id: 'S20', phase: 1, name: 'my-skill', label: '我的新 Skill',
+  tool: 'my_skill_run',                    // 对应 MCP Tool 名（步骤 4）
+  requires: ['S02'],                        // 前置 step id 数组
+  detect: () => exists(f001('my-output.md')), // 基于文件系统推断完成态
+  reason: 'my-output.md 不存在：调用 my-skill 做某事',
+  optional: false,                          // 可选：true 则不计入 requiredTotal（动态分母）
+},
+```
+
+字段约束：
+- `id`：S + 2 位数字，全局唯一，无小数（如 S20，不要 S20.5）
+- `phase`：1/2/3，决定归属阶段
+- `requires`：前置 step id；`detect()` 返回 true 时视为已完成
+- `optional: true` 的 step 不计入 CLI 的 `requiredTotal`（动态分母自动算，无需手改）
+
+#### 步骤 2 · Skill 实现（index.js）
+
+新建 `mcp-integration/examples/skills/<skill-name>/index.js`，导出与 entry-points 对应的函数，统一返回结构：
+
+```js
+module.exports = {
+  async run({ projectRoot, /* 业务参数 */ }) {
+    try {
+      // ... 业务逻辑
+      return {
+        ok: true,
+        data: { path: '...', summary: '...', llmEnhanced: false, llmProvider: null },
+        warnings: [],
+        nextActions: ['下一步建议'],
+      };
+    } catch (e) {
+      return { ok: false, error: e.message, data: null, warnings: [], nextActions: [] };
+    }
+  }
+};
+```
+
+返回结构硬约束（由 `tests/helper.cjs` 的 `assertStdResult` 校验）：
+- `ok: boolean` 必填
+- `error: string | null`
+- `data: object | null`；含 `llmEnhanced: boolean` / `llmProvider: string | null`（LLM 集成字段）
+- `warnings: string[]` / `nextActions: string[]`
+
+#### 步骤 3 · Skill 文档（SKILL.md）
+
+新建 `skills/<skill-name>/SKILL.md`，frontmatter 至少含：`name` / `description` / `version` / `entry-points` / `requires` / `phase` / `parent: project-orchestrator`。参考现有 [skills/ui-design/SKILL.md](file:///d:/TraeWork/88-Project/project-orchestrator-bundle/skills/ui-design/SKILL.md)。
+
+#### 步骤 4 ·（可选）MCP Tool 注册
+
+若新 Skill 要从 MCP Host 调用，在 [orchestrator-tools.ts](file:///d:/TraeWork/88-Project/project-orchestrator-bundle/mcp-integration/src/orchestrator-tools.ts) 的 `ListToolsRequestSchema` handler 追加 tool 定义（`name` 须与 step 的 `tool` 字段一致），并在 `CallToolRequestSchema` handler 追加 case 分发。改完跑 `npm run build -w mcp-integration` 重新构建 dist。
+
+#### 步骤 5 ·（可选）CLI 直跑脚本
+
+若希望绕过 MCP 直接命令行调用，新建 `mcp-integration/tests/cli-<skill-name>.cjs`，参考 [cli-orchestrator-status.cjs](file:///d:/TraeWork/88-Project/project-orchestrator-bundle/mcp-integration/tests/cli-orchestrator-status.cjs)。用 `node cli-<skill-name>.cjs` 直跑。
+
+#### 验证清单
+
+- [ ] `node --test tests/phase1.test.cjs`（或对应 phase）通过
+- [ ] `node cli-orchestrator-status.cjs <projectRoot> recompute` 能识别新 step
+- [ ] `node cli-orchestrator-status.cjs <projectRoot> status` 的 `requiredTotal` 自动 +1（若非 optional）
+- [ ] 新 Skill 的 `assertStdResult` 校验通过（返回结构合规）
 
 ---
 

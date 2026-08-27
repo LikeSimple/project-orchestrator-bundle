@@ -25,38 +25,38 @@ position: bootstrap-start
 
 ## 一、能力范围
 
-| 命令 | 用途 | 底层来源 |
+| 命令 | 用途 | 设计来源 |
 |---|---|---|
-| `/speckit.constitution` | 建立治理宪法 | Spec Kit 原生 |
-| `/speckit.specify` | 创建首个 feature 的 spec | Spec Kit 原生 |
-| `/speckit.clarify` | 消除歧义，最多 5 个问题 | Spec Kit 原生 |
-| `/speckit.plan` | 技术化 + 架构 | Spec Kit 原生 |
-| `/speckit.checklist` | 领域质量门 | Spec Kit 原生 |
-| `/speckit.tasks` | 任务拆分 | Spec Kit 原生 |
-| `/speckit.analyze` | 一致性扫描 | Spec Kit 原生 |
-| `/speckit.implement` | 执行实现 | Spec Kit 原生 |
+| `spec_bootstrap_constitution` | 建立治理宪法 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_specify` | 创建首个 feature 的 spec | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_clarify` | 消除歧义，最多 5 个问题 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_plan` | 技术化 + 架构 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_checklist` | 领域质量门 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_tasks` | 任务拆分 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_analyze` | 一致性扫描 | 兼容 Spec Kit 工作流 |
+| `spec_bootstrap_implement` | 执行实现 | 兼容 Spec Kit 工作流 |
+
+> **关于 Spec Kit CLI**：本 Skill 兼容 Spec Kit 工作流设计，但**不依赖 specify-cli 或任何外部 CLI**，所有命令均为自研实现。如需对比官方 Spec Kit 行为，可参考其文档，但无需安装。
 
 ## 二、使用方法
 
 ### 2.1 一次性环境准备
 
-```bash
-uv tool install specify-cli --from git+https://github.com/github/spec-kit.git@v0.16.3
-specify init my-project --integration claude   # 或 copilot / cursor / gemini 等
-cd my-project
-```
+无外部 CLI 依赖。唯一硬依赖为 **Node.js >= 18.0.0**。在支持 MCP 的客户端（TRAE / Claude Code / Cursor）中加载 `orchestrator-tools` MCP Server 后即可直接调用。
 
 ### 2.2 完整 Bootstrap（推荐）
 
-```bash
-# 在 Claude Code / Cursor / Gemini CLI 中调用
-/project-orchestrator.spec-bootstrap "我想做一个 SaaS 化的项目管理系统..."
+通过 MCP Tool 或父 Skill entry-point 调用：
+
+```
+MCP Tool: spec_bootstrap_specify → spec_bootstrap_plan → spec_bootstrap_tasks → ...
+父 Skill entry-point: bootstrap
 ```
 
 内部自动按以下顺序执行：
 
 ```
-Step 0  环境校验（specify-cli 版本、目标代理）
+Step 0  环境校验（Node.js 版本 + MCP 连通性）
 Step 1  Constitution 建立（用户回答问卷 → constitution.md）
 Step 2  Specify（自然语言 → spec.md）
 Step 3  Clarify（如有 NEEDS CLARIFICATION，最多 5 个问题）
@@ -67,13 +67,13 @@ Step 7  Analyze（spec ↔ plan ↔ tasks 一致性）
 Step 8  Implement（按 Phase 执行 + Checkpoint）
 ```
 
-### 2.3 单独调用
+### 2.3 单独调用（MCP Tool）
 
-```bash
-/speckit.constitution   # 仅建立宪法
-/speckit.specify "..."  # 仅生成 spec
-/speckit.plan           # 仅技术化
-/speckit.tasks          # 仅任务拆分
+```
+spec_bootstrap_constitution   # 仅建立宪法
+spec_bootstrap_specify        # 仅生成 spec（传入需求 description）
+spec_bootstrap_plan           # 仅技术化（基于 spec.md）
+spec_bootstrap_tasks          # 仅任务拆分（基于 plan.md）
 ```
 
 ## 三、关键产出物

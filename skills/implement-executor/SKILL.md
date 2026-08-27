@@ -104,10 +104,11 @@ implement-executor (本 Skill)
 - [ ] T001 使用 create-vite 创建前端工程
 - [ ] T002 [P] 安装 ESLint + Prettier
 ## Phase 2: Foundational (Blocking Prerequisites)
-- [ ] T003 [P] [US1] 实现 JWT 鉴权中间件 src/middleware/auth.ts
+- [ ] T003 [P] [US1] [backend] 实现 JWT 鉴权中间件 src/middleware/auth.ts
+- [ ] T004 [P] [US1] [frontend] 实现登录表单组件 src/components/LoginForm.tsx
 ## Phase 3: User Story 1 - 用户登录 (Priority: P1) MVP
-- [ ] T010 [P] [US1] 契约测试：POST /api/v1/auth/login
-- [ ] T011 [US1] 实现 login service
+- [ ] T010 [P] [US1] [backend] 契约测试：POST /api/v1/auth/login
+- [ ] T011 [P] [US1] [frontend] 实现登录 UI 交互 src/pages/Login.tsx
 ...
 ```
 
@@ -120,9 +121,26 @@ implement-executor (本 Skill)
 | `- [x]` | 已完成 | 跳过 |
 | `[P]` | 可并行 | 同 Phase 内可并行执行 |
 | `[US1]` `[US2]` | 所属 User Story | 用于跨任务追踪 |
+| `[frontend]` `[backend]` | 所属端 | 同 Phase 内不同端可并行，分别跑测试 |
+| `[shared]` | 跨端共享 | 工程基础设施（如 ESLint/tsconfig/契约文件），前后端共用 |
 | `T001` `T002` | 任务 ID | 用于日志和状态恢复 |
 | `src/path/file.ts` | 文件路径 | Agent 必须创建该文件 |
 | 描述文本 | 任务说明 | 作为 Agent prompt 输入 |
+
+### 3.3 跨端并行执行策略（前后端协同）
+
+当 scaffold-runner 生成的项目是组合栈（如 `react-vite+spring-boot`，结构 `apps/web` + `apps/api`）时：
+
+| Phase 内任务标记 | 执行顺序 | 测试命令 |
+|---|---|---|
+| 仅 `[frontend]` 任务 | 串行执行 | `npm run test:web`（vitest/jest） |
+| 仅 `[backend]` 任务 | 串行执行 | `npm run test:api`（mvn test/pytest/go test） |
+| 同时存在 `[frontend]` + `[backend]` 任务 | **并行执行**（各自串行内有序） | Checkpoint 时分别跑 `test:web` + `test:api` |
+| `[shared]` 任务（如契约、tsconfig） | 在 `[frontend]`/`[backend]` 之前 | 不单独跑测试 |
+| 无端标记的任务 | 兜底串行执行 | 走 `npm test`（兼容单端项目） |
+
+并行实现：Agent 在 Phase 内启动两个 sub-loop，frontend 任务串行 + backend 任务串行；两个 sub-loop 间互不阻塞。
+Checkpoint 门禁等所有 sub-loop 完成后统一触发，分别跑前后端测试。
 
 ## 四、单任务执行流程（Agent Loop）
 
@@ -186,13 +204,17 @@ checkpoint:
   - 所有任务已 [x]:
       验证: grep "- \[ \]" tasks.md
   - 测试通过:
-      命令: npm test / mvn test / pytest / cargo test
-      阈值: 100% pass
+      单端项目: npm test / mvn test / pytest / cargo test
+      组合栈项目（apps/web + apps/api）:
+        - npm run test:web   # 前端测试（vitest/jest）
+        - npm run test:api   # 后端测试（mvn test/pytest/go test）
+      阈值: 100% pass（两端分别通过）
   - 覆盖率达标:
       命令: npm run coverage
       阈值: ≥ 80% (configurable via constitution)
   - lint 零错误:
-      命令: npm run lint
+      单端: npm run lint
+      组合栈: npm --prefix apps/web run lint && npm --prefix apps/api run lint
       阈值: 0 error
   - 类型检查通过:
       命令: tsc --noEmit / mvn compile

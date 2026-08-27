@@ -1,21 +1,25 @@
 # project-orchestrator-bundle
 
-> AI Agent 协作编排场景下的项目全生命周期管理 Skill Bundle — 15 个子 Skill，覆盖从需求到发布的完整链路。
+> AI Agent 协作编排场景下的项目全生命周期管理 Skill Bundle — 15 个子 Skill + 19 步编排状态机 + 32 MCP Tools，覆盖从需求到发布的完整链路。
 
 [![CI](https://github.com/LikeSimple/project-orchestrator-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/LikeSimple/project-orchestrator-bundle/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
-[![MCP](https://img.shields.io/badge/MCP-2026--07--28-blue)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-2024--11--05-blue)](https://modelcontextprotocol.io/)
+[![Tests](https://img.shields.io/badge/tests-105%20passing-brightgreen)](mcp-integration/tests)
+[![Maturity](https://img.shields.io/badge/maturity-93.4%25-green)](maturity-analysis-report.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ## 是什么
 
-`project-orchestrator-bundle` 是一套**薄编排层 + 15 个专职子 Skill** 的设计模式。主入口 `project-orchestrator` 不直接执行任务，而是按三大阶段将工作分发到独立可调用的子 Skill：
+`project-orchestrator-bundle` 是一套**薄编排层 + 15 个专职子 Skill** 的设计模式。主入口 `project-orchestrator` 不直接执行任务，而是按 **19 步编排状态机**将工作分发到独立可调用的子 Skill：
 
-| 阶段 | Skill 数 | 职责 |
-|---|---|---|
-| Phase 1 · 项目初始化 | 7 | 从需求到可运行工程 + 设计文档 |
-| Phase 2 · 功能变更与实现 | 4 | 提案驱动变更 → 代码实现 → 测试 |
-| Phase 3 · 质量保障 | 4 | 调试、代码审查、依赖审计、环境管理 |
+| 阶段 | Skill 数 | 步骤数 | 职责 |
+|---|---|---|---|
+| Phase 1 · 项目初始化 | 7 | S01-S12（12 步，10 必做 + 2 可选） | 从需求到可运行工程 + 设计文档 |
+| Phase 2 · 功能变更与实现 | 4 | S13-S16（4 步必做） | 提案驱动变更 → 代码实现 → 测试 |
+| Phase 3 · 质量保障 | 4 | S17-S19（1 必做 + 2 可选） | 代码审查、依赖审计、环境管理 |
+
+> 编排状态机共 19 步（15 必做 + 4 可选），CLI 的 `requiredTotal` 动态计算=15（无需手改分母）。详见 [SKILL.md §8.2 编排状态机](SKILL.md)。
 
 ### 15 个子 Skill 一览
 
@@ -41,7 +45,9 @@
 
 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 是 AI Agent 与外部工具通信的开放标准。**Skill Bundle** 是一组遵循 MCP 规范的工具集合，以薄编排层分发任务到多个专职子 Skill——每个子 Skill 独立可调用、独立可上架。
 
-本 Bundle 需要一个支持 MCP 的客户端（如 TRAE / Claude Code / Cursor）来加载和调用。加载后，15 个子 Skill 会作为 MCP Tool 暴露给 Agent，Agent 按需自动调用。
+本 Bundle 需要一个支持 MCP 的客户端（如 TRAE / Claude Code / Cursor）来加载和调用。加载后，**32 个 MCP Tools** 会作为编排层接口暴露给 Agent，Agent 按需自动调用，编排层按状态机依赖关系分发到 15 个子 Skill。
+
+> **MCP SDK 版本**：`@modelcontextprotocol/sdk` 0.6+，stdio 传输使用 **NDJSON 协议**（每行一个 JSON，`\n` 分隔），协议版本 `2024-11-05`。
 
 ## 前置条件
 
@@ -77,9 +83,12 @@ Bundle 清单是 YAML 描述文件，记录该 Bundle 包含哪些 Skill 及其�
 
 #### 前置：注册 MCP Server
 
-将 `mcp-integration/mcp.json` 中的 MCP Server 配置注册到你的 MCP 客户端（TRAE / Claude Code / Cursor）。配置后，15 个子 Skill 会作为 MCP Tool 暴露，Agent 可自动调用。
+将 MCP Server 配置注册到你的 MCP 客户端（TRAE / Claude Code / Cursor）。配置后，**32 个 MCP Tools** 会作为编排层接口暴露，Agent 按需自动调用，编排层分发到 15 个子 Skill。
 
-TRAE 用户可直接使用 `mcp-integration/.trae.mcp.json`；其他客户端参考 `mcp.json` 中的 `command` / `args` / `env` 字段适配。
+- **TRAE 用户**：直接使用 [`mcp-integration/.trae.mcp.json`](mcp-integration/.trae.mcp.json) 或项目根 `.trae/mcp.json`（quickstart 脚本自动写入，UTF-8 无 BOM 格式）
+- **其他客户端**：参考 [`mcp-integration/mcp.json`](mcp-integration/mcp.json) 中的 `command` / `args` / `env` 字段适配
+
+> **配置关键**：`PROJECT_ROOT` 指向目标项目（产物生成位置），`SKILL_BUNDLE_PATH` 指向本 Bundle 目录（工具代码位置）。详见[跨项目复用](#跨项目复用一套-bundle多个项目)。
 
 #### 一键启动（可选）
 
@@ -92,6 +101,23 @@ cd mcp-integration && ./quickstart.sh
 ```
 
 脚本会自动执行 `npm install` → `npm run build` → `npm start`，启动 MCP Server。
+
+> quickstart 脚本以**增量合并**模式写入 `.trae/mcp.json`（仅新增 `orchestrator-tools` server，不覆盖现有配置）。如配置变更后 MCP Host 未识别新工具，需手动重启 MCP Server。
+
+#### 编排状态机用法（CLI 直跑）
+
+```bash
+cd mcp-integration/tests
+
+# 查看编排状态（19 步进度 + nextActions 引导）
+node cli-orchestrator-status.cjs <projectRoot> status
+
+# 重算状态（id 变更或文件系统变更后）
+node cli-orchestrator-status.cjs <projectRoot> recompute
+
+# 健康度仪表盘（4 指标 + 7 天滑窗）
+node cli-orchestrator-status.cjs <projectRoot> dashboard
+```
 
 #### Slash 命令用法
 
@@ -177,73 +203,74 @@ bash ../project-orchestrator-bundle/mcp-integration/quickstart.sh --mcp=trae
 
 ```
 project-orchestrator-bundle/
-├── SKILL.md                               # 主编排入口（15 Skill 概览）
+├── SKILL.md                               # 主编排入口（15 Skill 概览 + 19 步状态机 + 新 Skill 注册流程）
 ├── README.md                              # 本文件
-├── maturity-analysis-report.md            # 成熟度分析报告（v8）
+├── maturity-analysis-report.md            # 成熟度分析报告（v10，93.4%，10 维度）
 ├── .env.example                           # 环境变量模板
 ├── package.json                           # workspace 根配置
-├── bundles/                               # Bundle 清单
+├── bundles/                               # Bundle 清单（4 套预置）
 │   ├── full-stack.yaml                    # 完整 Bundle（15 Skill）
 │   ├── frontend-only.yaml                 # 前端 Bundle
 │   ├── api-only.yaml                      # API Bundle
 │   └── design-only.yaml                   # 设计 Bundle
-├── skills/                                # 子 Skill 设计文档
-│   ├── spec-bootstrap/SKILL.md
-│   ├── scaffold-runner/SKILL.md
-│   ├── ui-design/SKILL.md
-│   ├── spec-userstory-to-design/SKILL.md
-│   ├── api-contract/SKILL.md
-│   ├── openspec-workflow/SKILL.md
-│   ├── html-converter/SKILL.md
-│   ├── implement-executor/SKILL.md
-│   ├── test-runner/SKILL.md
-│   ├── code-patterns/SKILL.md
-│   ├── git-workflow/SKILL.md
-│   ├── debug-helper/SKILL.md
-│   ├── review-checklist/SKILL.md
-│   ├── dependency-auditor/SKILL.md
-│   └── environment-manager/SKILL.md
-├── mcp-integration/                       # 实现 + MCP 集成
-│   ├── package.json                       # 构建脚本 + 依赖
-│   ├── tsconfig.json                      # TypeScript 配置
-│   ├── mcp.json                           # MCP Server 配置
-│   ├── .trae.mcp.json                     # TRAE MCP 配置
-│   ├── quickstart.ps1                     # Windows 一键启动脚本
-│   ├── quickstart.sh                      # macOS/Linux 一键启动脚本
-│   ├── src/                               # 源码
-│   │   ├── orchestrator-tools.ts          # MCP Tool 编排层（TypeScript）
-│   │   └── skill-cli.cjs                  # 命令行入口（CommonJS）
-│   ├── examples/                          # 源实现 + 示例
-│   │   ├── lib/                           # 共享库
-│   │   │   ├── llm-client.js             # 共享 LLM 客户端（6 Provider）
-│   │   │   ├── ast-parser.js             # AST 解析器（parse5 + csstree + recast）
-│   │   │   └── benchmark.js              # 性能基准测试
-│   │   └── skills/                        # 15 个子 Skill 实现
-│   │       ├── api-contract/index.js
-│   │       ├── code-patterns/index.js
-│   │       ├── debug-helper/index.js
-│   │       ├── dependency-auditor/index.js
-│   │       ├── environment-manager/index.js
-│   │       ├── git-workflow/index.js
-│   │       ├── html-converter/index.js
-│   │       ├── implement-executor/index.js
-│   │       ├── openspec-workflow/index.js
-│   │       ├── review-checklist/index.js
-│   │       ├── scaffold-runner/index.js
-│   │       ├── spec-bootstrap/index.js
-│   │       ├── spec-userstory-to-design/index.js
-│   │       ├── test-runner/index.js
-│   │       └── ui-design/index.js
-│   ├── docs/                              # 文档
-│   │   └── benchmarks/baseline.json       # 性能基线数据
-│   └── dist/                              # 构建产物（npm run build 生成）
-│       ├── skill-cli.cjs                  # 命令行入口
-│       ├── orchestrator-tools.js         # MCP 入口
-│       ├── lib/                           # 构建后的共享库
-│       └── skills/                        # 构建后的 Skill
-└── docs/                                  # 维护文档
-    └── env-setup.md                       # 环境配置指南
+├── skills/                                # 15 个子 Skill 设计文档（SKILL.md）
+├── contracts/                             # API 契约（S11 正式产物）
+│   └── openapi.yaml                       # OpenAPI 3.1.2
+├── specs/                                 # 项目 spec 文档
+├── prototype/                             # UI 原型（S03 产物）
+│   └── index.html
+├── docs/                                  # 维护文档 + 设计产物
+│   ├── env-setup.md                       # 环境配置指南
+│   ├── design/                            # S09 草案产物（spec-userstory-to-design）
+│   │   └── <feature>/                     # 按 feature 组织
+│   │       ├── openapi.yaml               # S09 草案（version 含 -draft）
+│   │       ├── page-flow.md
+│   │       └── pages/
+│   ├── full-14-turn-flow.html             # 14 轮完整流程演示
+│   └── full-14-turn-flow.pdf
+├── .orchestrator-sm/                      # 编排状态机持久化（state.json / events.ndjson）
+├── .orchestrator-health/                  # 健康度监控数据
+├── .specify/                              # 项目宪法（S01 产物）
+│   └── memory/constitution.md
+├── .trae/                                 # TRAE MCP 配置
+│   └── mcp.json
+└── mcp-integration/                       # 实现 + MCP 集成
+    ├── package.json                       # 构建脚本 + 依赖
+    ├── tsconfig.json                      # TypeScript 配置
+    ├── mcp.json                           # MCP Server 配置（通用）
+    ├── .trae.mcp.json                     # TRAE MCP 配置
+    ├── quickstart.ps1                     # Windows 一键启动脚本
+    ├── quickstart.sh                      # macOS/Linux 一键启动脚本
+    ├── src/                               # 源码
+    │   ├── orchestrator-tools.ts          # MCP Tool 编排层（32 Tools，TypeScript）
+    │   └── skill-cli.cjs                  # 命令行入口（CommonJS）
+    ├── examples/                          # 源实现 + 示例（Skill 实际生效路径）
+    │   ├── lib/                           # 共享库
+    │   │   ├── llm-client.js             # 共享 LLM 客户端（6 Provider + MCP Sampling）
+    │   │   ├── ast-parser.js             # AST 解析器（parse5 + csstree + recast）
+    │   │   ├── orchestrator-state-machine.js  # 19 步状态机定义
+    │   │   ├── health-monitor.js         # 健康度监控（4 指标 + 7 天滑窗）
+    │   │   └── benchmark.js              # 性能基准测试
+    │   └── skills/                        # 15 个子 Skill 实现
+    │       └── <skill-name>/index.js
+    ├── tests/                             # 测试套件（105 测试）
+    │   ├── phase1.test.cjs                # 26 测试
+    │   ├── phase2.test.cjs                # 25 测试
+    │   ├── phase3.test.cjs                # 36 测试
+    │   ├── e2e-pipeline.test.cjs          # 18 测试（全链路）
+    │   ├── helper.cjs                     # 测试工具
+    │   ├── cli-*.cjs                      # 5 个 CLI 直跑脚本
+    │   └── e2e-check.cjs / smoke-p2.cjs   # 烟雾测试
+    ├── scripts/                           # 构建/迁移脚本
+    │   └── postbuild.js                   # 构建后处理
+    ├── contracts/                         # 历史契约副本（contracts/ 根为正式）
+    └── dist/                              # 构建产物（npm run build 生成）
+        ├── skill-cli.cjs                  # 命令行入口
+        ├── orchestrator-tools.js          # MCP 入口（32 Tools）
+        └── lib/                           # 构建后的共享库
 ```
+
+> **注意**：`dist/skills/` 为历史残留（postbuild.js 不再拷贝 skills/ 到 dist，skill-cli.cjs 直引 `examples/skills/`），修改 Skill 实现请改 `examples/skills/`。
 
 ## 构建与开发
 
@@ -330,28 +357,35 @@ npm start
 ## 测试与质量
 
 ```bash
-# 运行全部测试（91 个测试）
-npx mocha tests/phase1.test.cjs tests/phase2.test.cjs tests/phase3.test.cjs tests/e2e-pipeline.test.cjs --timeout 60000
+# 运行全部测试（105 个测试，0 失败）
+cd mcp-integration
+node --test tests/phase1.test.cjs tests/phase2.test.cjs tests/phase3.test.cjs tests/e2e-pipeline.test.cjs
 
-# 运行 E2E 检查
+# 运行 E2E 烟雾检查
 node tests/e2e-check.cjs
+
+# 运行编排状态机烟雾测试（P2 链路）
+node tests/smoke-p2.cjs
 ```
 
 ### 测试覆盖
 
 | 测试文件 | 测试数 | 覆盖范围 |
 |---|---|---|
-| `phase1.test.cjs` | ~30 | 7 个 Phase 1 Skill 的全部命令 |
-| `phase2.test.cjs` | ~20 | 4 个 Phase 2 Skill 的全部命令 |
-| `phase3.test.cjs` | ~29 | 4 个 Phase 3 Skill + AST 分析 + npm audit + Doppler/Vault |
-| `e2e-pipeline.test.cjs` | 12 | 全链路：spec→scaffold→design→implement→test→git→review + 数据流传递 + AST 传播 |
+| `phase1.test.cjs` | 26 | 7 个 Phase 1 Skill 的全部命令 |
+| `phase2.test.cjs` | 25 | 4 个 Phase 2 Skill 的全部命令 |
+| `phase3.test.cjs` | 36 | 4 个 Phase 3 Skill + AST 分析 + npm audit + Doppler/Vault |
+| `e2e-pipeline.test.cjs` | 18 | 全链路：spec→scaffold→design→implement→test→git→review + 数据流传递 + AST 传播 |
+| **合计** | **105** | **0 失败**（2026-08-27 验证） |
 
 ### 质量保障措施
 
 - **AST 解析 100% 覆盖**：15/15 个 Skill 全部使用 AST 解析（parse5 + csstree + recast + @babel/parser），无正则表达式解析
 - **测试断言加固**：30 个弱断言已升级为深度数据字段断言（检查 `data` 关键字段值，而非仅检查 `ok` 类型）
 - **Windows 兼容**：`spawnSync` + `shell: true` 替代 `execAsync`，修复 git-workflow / dependency-auditor / environment-manager 的 stdout pipe 问题
-- **E2E 链路验证**：12 步全流程测试覆盖 spec→scaffold→design→implement→test→git→review，验证 Skill 间数据传递正确性
+- **E2E 链路验证**：18 步全流程测试覆盖 spec→scaffold→design→implement→test→git→review，验证 Skill 间数据传递正确性
+- **UTF-8 统一**：187 文件 0 TSD 二进制残留，`.trae/mcp.json` BOM 问题已修复
+- **历史脚本清理**：9 个一次性 `fix-*.cjs` 脚本已删除（TSD 修复完成后无用途）
 
 ## LLM 集成
 
@@ -427,56 +461,69 @@ await llm.reviewCode({ code, checklist, ... });
 - 无 API key → 自动回退到启发式规则 / 模板生成模式
 - 所有降级静默执行，返回 `data.llmEnhanced: false`，不影响核心功能
 
+### refineLogic 的 LLM 增强路径
+
+`spec-userstory-to-design` 的 `refineLogic`（S10 可选步骤）采用三级优先策略生成场景列表：
+
+| 优先级 | 来源 | 条件 | llmEnhanced |
+|---|---|---|---|
+| 1 | 用户提供 scenarios | 调用方传入非空 scenarios 数组 | false（直接使用） |
+| 2 | LLM 增强（`generateScenariosViaLLM`） | `llm.isAvailable()` 返回 true | true |
+| 3 | 启发式兜底（`heuristicScenarios`） | LLM 不可用或调用失败 | false + warnings 提示 |
+
+LLM 增强生成的场景覆盖 happy/error/edge 三类（含参数校验、未授权、资源不存在、业务规则冲突、并发冲突，longTx=true 时含长事务中断与补偿），返回结构对齐启发式输出。LLM 失败自动回退到启发式，不影响核心功能。
+
 ## 架构概览
 
 ```mermaid
 graph TB
     subgraph 编排层
-        ORC["project-orchestrator<br/>薄编排层（不执行任务）"]
+        ORC["project-orchestrator<br/>薄编排层 + 19 步状态机（S01-S19）"]
     end
 
-    subgraph P1["Phase 1 · 项目初始化（7 Skill）"]
-        S1[spec-bootstrap]
-        S2[scaffold-runner]
-        S3[ui-design]
-        S4[spec-userstory-to-design]
-        S5[api-contract]
-        S6[openspec-workflow]
-        S7[html-converter]
+    subgraph P1["Phase 1 · 项目初始化（7 Skill / S01-S13）"]
+        S01[spec-bootstrap<br/>S01 constitution]
+        S02[scaffold-runner<br/>S02 scaffold]
+        S03[ui-design<br/>S03 prototype]
+        S04[spec-userstory-to-design<br/>S04 design]
+        S05[api-contract<br/>S05 contract]
+        S06[openspec-workflow<br/>S06 change]
+        S07[html-converter<br/>S07 components]
+        S10[refine-logic<br/>S10 refine 可选]
     end
 
-    subgraph P2["Phase 2 · 功能变更与实现（4 Skill）"]
-        S8[implement-executor]
-        S9[test-runner]
-        S10[code-patterns]
-        S11[git-workflow]
+    subgraph P2["Phase 2 · 功能变更与实现（4 Skill / S14-S17）"]
+        S14[implement-executor<br/>S14 implement]
+        S15[test-runner<br/>S15 test]
+        S16[code-patterns<br/>S16 patterns 可选]
+        S17[git-workflow<br/>S17 commit]
     end
 
-    subgraph P3["Phase 3 · 质量保障（4 Skill）"]
-        S12[debug-helper]
-        S13[review-checklist]
-        S14[dependency-auditor]
-        S15[environment-manager]
+    subgraph P3["Phase 3 · 质量保障（4 Skill / S18-S19）"]
+        S18[review-checklist<br/>S18 review]
+        S19[debug-helper<br/>S19 debug 可选]
     end
 
-    ORC -->|分发| P1
-    ORC -->|分发| P2
-    ORC -->|分发| P3
+    ORC -->|状态机分发| P1
+    ORC -->|状态机分发| P2
+    ORC -->|状态机分发| P3
 
     subgraph 共享层
-        LLM["llm-client.js<br/>10 个结构化方法<br/>MCP Sampling 优先 + 6 Provider 降级"]
+        LLM["llm-client.js<br/>MCP Sampling 优先 + 6 Provider 降级"]
         AST["ast-parser.js<br/>parse5 + csstree + recast + @babel/parser"]
+        SM["orchestrator-state-machine.js<br/>19 步 + 动态分母"]
+        HM["health-monitor.js<br/>4 指标 + 7 天滑窗"]
     end
 
     P1 -.->|调用| LLM
     P2 -.->|调用| LLM
     P3 -.->|调用| LLM
     P1 -.->|调用| AST
-    P2 -.->|调用| AST
-    P3 -.->|调用| AST
+    ORC -.->|驱动| SM
+    ORC -.->|监控| HM
 ```
 
-三层分析架构（每个 Skill 内部）：AST 预检测（精确事实）→ 代码模式分析（结构化识别）→ LLM 深度分析（上下文推理）。
+三层分析架构（每个 Skill 内部）：AST 预检测（精确事实）→ 代码模式分析（结构化识别）→ LLM 深度分析（上下文推理）。状态机按 `requires` 依赖关系串联 19 步，`optional` 步骤不计入 `requiredTotal`（动态分母=15）。
 
 ## 核心工作流
 
@@ -503,40 +550,43 @@ spec_bootstrap_constitution
 
 任何 Skill 运行时如果发现与宪法冲突，会中止并报告，而非静默偏离。这保证了多 Skill 协作时的一致性。
 
-### Phase 1 · 项目初始化
+### Phase 1 · 项目初始化（S01-S12，10 必做 + 2 可选）
 
 ```
-spec-bootstrap              → spec.md / plan.md / tasks.md
-scaffold-runner             → 可运行工程（17 模板）
-ui-design                   → prototype/index.html
-spec-userstory-to-design    → docs/design/（Page Flow + Page Detail + OpenAPI）
-api-contract                → contracts/openapi.yaml
-html-converter              → components/*.tsx 或 *.vue
-code-patterns               → .code-patterns.yaml（团队规范注入）
-openspec-workflow           → openspec/changes/（变更提案）
+S01  constitution             → .specify/memory/constitution.md（项目宪法）
+S02  specify                  → spec.md
+S03  clarify                  → .clarified 标记（澄清歧义）
+S04  plan                     → plan.md（技术方案）
+S05  checklist                → checklist.md（领域质量清单）
+S06  tasks                    → tasks.md（按 Phase 拆分）
+S07  scaffold                 → 可运行工程（17 模板，支持组合栈 monorepo）
+S08  ui-design                → prototype/index.html
+S09  design                   → docs/design/<feature>/（Page Flow + Page Detail + OpenAPI 草案）
+S10  refine-logic（可选）      → docs/design/<feature>/logic/<op>.md（复杂接口细化）
+S11  contract                 → contracts/openapi.yaml（S11 正式契约，消费 S09 草案）
+S12  html.convert（可选）      → components/*.tsx 或 *.vue
 ```
 
-### Phase 2 · 功能变更与实现
+### Phase 2 · 功能变更与实现（S13-S16，4 步必做）
 
 ```
-openspec-workflow           → PROPOSAL.md / SPEC delta / TASKS.md
-implement-executor          → Phase 驱动 Agent 循环
-  ├─ 解析 tasks.md（按 Phase 分组）
-  ├─ LLM 生成代码 → 写文件 → 跑测试
-  ├─ 失败反馈 → LLM 修复 → 重试（最多 3 次）
-  ├─ Checkpoint 门禁（测试 + lint + tsc）
-  └─ .implement-state.json 状态持久化
-test-runner                 → 多框架测试 + 覆盖率
-git-workflow                → branch / commit / merge / release
+S13  openspec                 → openspec/changes/*/PROPOSAL.md（变更提案）
+S14  implement                → Phase 驱动 Agent 循环
+   ├─ 解析 tasks.md（按 Phase 分组）
+   ├─ LLM 生成代码 → 写文件 → 跑测试
+   ├─ 失败反馈 → LLM 修复 → 重试（最多 3 次）
+   ├─ Checkpoint 门禁（测试 + lint + tsc）
+   └─ .implement-state.json 状态持久化（支持断点恢复）
+S15  test                     → 多框架测试 + 覆盖率
+S16  commit                   → Conventional Commits 提交
 ```
 
-### Phase 3 · 质量保障
+### Phase 3 · 质量保障（S17-S19，1 必做 + 2 可选）
 
 ```
-debug-helper                → 三层根因分析 + LLM 深度诊断
-review-checklist            → 73 条规则审查（7 大类）
-dependency-auditor          → npm audit + License + 健康度评分
-environment-manager         → 4 环境 + Secrets 管理 + 校验
+S17  review（可选）           → 73 条规则审查（7 大类）
+S18  audit                    → 真实 npm audit + License + 健康度评分
+S19  env（可选）              → 4 环境 + Secrets 管理（dotenv / Doppler / Vault）
 ```
 
 ## 设计理念
@@ -646,7 +696,7 @@ Bundle **不依赖 SpecKit 或 OpenSpec CLI 工具**。它借鉴了这两个工�
 |---|---|
 | 规范驱动 | 兼容 SpecKit 工作流设计（自研实现，不依赖 SpecKit CLI） |
 | 变更管理 | 兼容 OpenSpec 工作流设计（自研实现，不依赖 OpenSpec CLI） |
-| LLM 集成 | **MCP Sampling（首选）** + 6 Provider 降级（Anthropic / OpenAI / DeepSeek / Qwen / Moonshot / Custom） |
+| LLM 集成 | **MCP Sampling（首选）** + 6 Provider 降级（Anthropic / OpenAI / DeepSeek / Qwen / Moonshot / Custom），11 个结构化方法 |
 | 构建系统 | TypeScript 5.5+ tsc + postbuild.js |
 | MCP 集成 | @modelcontextprotocol/sdk 0.6+（tools + sampling） |
 | AST 解析 | parse5 (HTML) · css-tree (CSS) · recast (JS/TS) · @babel/parser (TS 校验) — **43 个 API，15/15 Skill 100% 迁移** |
@@ -658,40 +708,49 @@ Bundle **不依赖 SpecKit 或 OpenSpec CLI 工具**。它借鉴了这两个工�
 
 ## 项目成熟度
 
-当前成熟度：**96%**（Phase 3 · Beta 后期，稳定）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md)
+当前成熟度：**93.4%**（v10 · Beta 后期，稳定）— 详见 [maturity-analysis-report.md](maturity-analysis-report.md)
 
-| 维度 | 评分 |
-|---|---|
-| 设计文档完整度 | 96% |
-| 实际代码实现度 | 93% |
-| MCP 集成方案 | 98% |
-| Bundle 配置 | 95% |
-| 架构设计合理性 | 98% |
+### 10 维度评分（v10）
 
-### v8 已修复的关键问题
+| # | 维度 | 评分 | 关键依据 |
+|---|---|---|---|
+| 1 | 编排状态机成熟度 | 95% | 19 步覆盖 3 Phase / 4 optional / 动态分母 15 / Phase 1 100% |
+| 2 | 健康度监控 | 90% | 4 指标 + 4 仪表盘格式 + 7 天滑窗 / smoke-p2 验证 rollbackRate=33.3% |
+| 3 | 工具链覆盖 | 98% | 32 MCP Tools 动态验证可见（NDJSON 握手 + tools/list）+ 15 Skills + 5 CLI |
+| 4 | 文档完整性 | 95% | spec/plan/checklist/tasks/design(8)/logic(2)/prototype 全链齐全 / openapi 派生关系明确 |
+| 5 | 测试覆盖 | 95% | phase1 26 + phase2 25 + phase3 36 + e2e 18 = 105 测试 0 失败 |
+| 6 | 代码质量 | 92% | ESM 兼容 / UTF-8 统一（187 文件 0 TSD）/ id 体系 S01-S19 一致 / 9 个 fix-*.cjs 已清理 |
+| 7 | 可维护性 | 90% | 动态分母 / 文档同步 / migrate 脚本可复现 / Skill 注册流程文档化 |
+| 8 | 扩展性 | 95% | optional 步骤 / complexity 信号驱动 / refineLogic LLM 增强路径 / 新 Skill 三件套流程 |
+| 9 | 用户体验 | 89% | CLI 输出清晰 / nextActions 引导 / .trae/mcp.json BOM 已修复 |
+| 10 | 契约一致性 | 95% | spec↔plan↔checklist↔tasks↔design↔logic 链条完整 / operationId 统一 listP2s |
 
-- ✅ LLM 全量深度集成（15/15 Skill 使用结构化 LLM 方法，0 个未结构化）
+### v10 已完成的关键改进
+
+- ✅ 编排状态机 19 步完整落地（id 统一 S01-S19 + 4 optional + 动态分母）
+- ✅ 32 MCP Tools 动态验证可见（NDJSON 协议握手 + tools/list 运行时返回 32 工具）
+- ✅ 测试全量验证通过（phase1 26 + phase2 25 + phase3 36 + e2e 18 = 105 测试 0 失败）
+- ✅ LLM 全量深度集成（15/15 Skill 使用结构化 LLM 方法）
 - ✅ 三层分析架构落地（AST 预检测 → 代码模式分析 → LLM 深度分析）
-- ✅ llm-client.js 方法体系扩展到 10 个结构化方法（新增 `analyzeError`）
 - ✅ pipeline 断点恢复机制（resume / rollback / abort + 重试预算 + 状态验证）
-- ✅ 性能基线数据（benchmark.js + baseline.json，AST 解析 < 3ms）
 - ✅ AST 解析 100% 覆盖（15/15 Skill 迁移到 parse5 + csstree + recast + @babel/parser）
-- ✅ 端到端链路测试（12 步全流程验证 + AST 传播校验）
-- ✅ dependency-auditor 真实 npm audit（`npm audit --json` + CVE 解析）
-- ✅ environment-manager Doppler/Vault 集成（三后端 Secrets 管理）
-- ✅ 测试断言加固（30 个弱断言升级为深度数据字段断言）
-- ✅ Windows 兼容性（`spawnSync` + `shell: true` 修复 stdout pipe 问题）
-- ✅ MCP Sampling 全链路（LLM 请求复用 Agent 框架 LLM）
+- ✅ dependency-auditor 真实 npm audit + environment-manager Doppler/Vault 集成
+- ✅ refineLogic LLM 增强路径（三级优先：用户 > LLM > 启发式）
+- ✅ page-detail operationId 与 openapi 统一（listP2s）
+- ✅ openapi S09 草案 → S11 正式派生关系明确
+- ✅ 新 Skill 注册流程文档化（SKILL.md §8.5 三件套）
+- ✅ .trae/mcp.json BOM 修复 + 9 个历史 fix-*.cjs 脚本清理
 
-### 路线图（剩余 4%）
+### 路线图（剩余 6.6%）
 
 | 优先级 | 待办 | 说明 |
 |---|---|---|
-| P3 | 编排状态机 | 主 Skill 自动串联 Phase 1 → 2 → 3，无需手动逐个调用 |
+| — | Phase 2/3 实战验证 | S14-S19 检测逻辑未跑过真实项目数据 |
+| — | dist/skills/ 残留清理 | postbuild 不再拷贝，可删 dist/skills/ 目录 |
+| — | refineLogic LLM 真实环境实测 | 当前回退启发式，未在真实 LLM Provider 下验证 |
 | — | 真实 macOS / Linux 手动验证 | CI 之外的多平台端到端测试 |
 | — | Marketplace 上架 | 文档、示例、视频教程 |
 | — | 性能优化 | 大型项目（1000+ 文件）的响应时间优化 |
-| — | 多语言 / i18n | Skill 输出多语言支持 |
 
 ## 许可
 

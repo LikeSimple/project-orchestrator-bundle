@@ -54,6 +54,33 @@ position: bootstrap-after-spec
   expo          生成 Expo (React Native) 工程
   dotnet-webapi 生成 .NET WebAPI 工程
   rust          生成 Rust 二进制工程
+
+组合栈（前后端分离，monorepo 结构）：
+  react-vite+spring-boot   React + Spring Boot（pnpm workspace）
+  react-vite+nestjs-api   React + NestJS
+  vue3-vite+spring-boot   Vue 3 + Spring Boot
+  react-vite+fastapi      React + FastAPI
+
+  任意 frontend+backend 组合皆可，无显式预设也支持。
+  生成的目录结构（以 react-vite+spring-boot 为例）：
+    <project-name>/
+    ├── package.json           # workspace root（npm/pnpm workspaces）
+    ├── pnpm-workspace.yaml   # 声明 apps/web 与 apps/api
+    ├── README.md             # 组合栈说明 + 启动命令
+    └── apps/
+        ├── web/              # 前端子工程（react-vite）
+        └── api/              # 后端子工程（spring-boot）
+
+  组合栈内部策略：
+    1. 拆分 stack 为 [frontend, backend]，分别走单栈 run 流程
+    2. 前端落 apps/web，后端落 apps/api（COMPOSITE_TEMPLATES 可覆盖）
+    3. 生成 workspace 根 package.json + pnpm-workspace.yaml
+    4. 同 Phase 内前后端可并行执行（详见 implement-executor）
+    5. 测试分别跑：前端 vitest/jest，后端 mvn test/pytest/go test
+
+  注：预设组合均使用内置 TEMPLATES 子栈（沙箱/CI 友好）。
+  若传 SCAFFOLD_COMMANDS 形式栈名（如 vue-vite、nextjs、nest、rust），
+  单栈 run 会尝试外部 CLI，调用方需具备对应脚手架（npm/npx/cargo）。
 ```
 
 ### 1.2 `/add-dep` 添加依赖
