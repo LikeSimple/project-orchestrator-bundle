@@ -36,10 +36,27 @@ const PROJECT_ROOT = process.env.PROJECT_ROOT || process.cwd();
 const SKILL_BUNDLE_PATH = process.env.SKILL_BUNDLE_PATH || PROJECT_ROOT;
 const SKILL_CLI_BIN = process.env.SKILL_CLI_BIN ||
   resolve(SKILL_BUNDLE_PATH, 'mcp-integration/dist/skill-cli.cjs');
+// 共享库：健康度监控 + 编排状态机
+const HEALTH_MONITOR_JS = resolve(SKILL_BUNDLE_PATH, 'mcp-integration/examples/lib/health-monitor.js');
+const STATE_MACHINE_JS = resolve(SKILL_BUNDLE_PATH, 'mcp-integration/examples/lib/orchestrator-state-machine.js');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 const log = (msg: string) => console.error(`[orchestrator-tools] ${msg}`);
+
+// 动态加载 lib 模块（ESM 兼容模式：运行时 import() 动态加载，支持加载任意 .js/.cjs 文件）
+// - health-monitor.js / orchestrator-state-machine.js 是 CommonJS（module.exports）
+// - 在 ESM 下通过 dynamic import() 加载它们，返回值位于 ns.default
+async function requireLib(absPath: string): Promise<any> {
+  try {
+    // 使用 data URL 前缀 + 绝对路径拼接，避开 ESM 对绝对文件 URL 的跨平台差异
+    const fileUrl = 'file:///' + absPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const ns = await import(fileUrl);
+    return ns && (ns as any).default ? (ns as any).default : ns;
+  } catch (e: any) {
+    throw new Error(`Failed to load ${absPath}: ${e.message}`);
+  }
+}
 
 // ============================================================
 // 类型定义
@@ -685,6 +702,97 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['env'],
       },
     },
+
+    // ============ P2 · 健康度监控（Health Monitor） ============
+    {
+      name: 'health_monitor_record_event',
+      description: 'health-monitor.recordEvent — 记录一个健康度事件（撤销 / 澄清 / 投诉 / npm-outdated / 自定义）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          eventType: {
+            type: 'string',
+            enum: ['task.start', 'task.complete', 'clarify.issue', 'rollback.exec', 'complaint.effect', 'npm.outdated', 'custom'],
+            description: '事件类型',
+          },
+          payload: {
+            type: 'object',
+            additionalProperties: true,
+            description: '事件负载：如 { taskId:T001, reason:"实现有误" } 或 { count:5, packages:[...] }',
+          },
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+        required: ['eventType'],
+      },
+    },
+
+    {
+      name: 'health_monitor_check',
+      description: 'health-monitor.checkThresholds — 计算 4 项健康度指标 + 阈值告警（撤销率/澄清比/投诉/npm outdated）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          scanNpm: { type: 'boolean', default: true, description: '是否实时运行 npm outdated（否则取缓存/最后一次事件）' },
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+      },
+    },
+
+    {
+      name: 'health_monitor_dashboard',
+      description: 'health-monitor.dashboard — 生成仪表盘（Markdown / HTML / JSON），含指标卡片 + 告警 + 建议动作',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          format: { type: 'string', enum: ['markdown', 'html', 'json'], default: 'markdown' },
+          includePackages: { type: 'boolean', default: true, description: '仪表盘是否包含 outdated 包明细' },
+          weekly: { type: 'boolean', default: false, description: 'true = 输出周报（撤销率周报专用输出）' },
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+      },
+    },
+
+    // ============ P2 · 编排状态机（Orchestrator State Machine） ============
+    {
+      name: 'orchestrator_status',
+      description: 'orchestrator-state-machine.status — 查询当前编排状态（Phase / 已完成步骤 / 下一候选步骤 / 检查点结果）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+      },
+    },
+
+    {
+      name: 'orchestrator_next',
+      description: 'orchestrator-state-machine.next — 基于当前项目状态推荐下一步（自动判断所属 Phase + 缺失前置 + 返回候选 nextActions）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          autoAdvance: { type: 'boolean', default: false, description: '若满足前置则自动执行下一个 MCP Tool 并返回结果' },
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+      },
+    },
+
+    {
+      name: 'orchestrator_transition',
+      description: 'orchestrator-state-machine.transition — 手动写入状态机状态（完成某 Phase / 回退 / 重置）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['mark_phase_done', 'rollback_phase', 'reset', 'recompute'],
+            description: 'mark_phase_done 标记指定 Phase 完成；rollback_phase 回退到指定 Phase；reset 清空；recompute 重新基于文件系统推断状态',
+          },
+          phase: { type: 'integer', enum: [1, 2, 3], description: '配合 mark_phase_done / rollback_phase 使用' },
+          projectRoot: { type: 'string', description: '项目根（默认 = MCP Server PROJECT_ROOT）' },
+        },
+        required: ['action'],
+      },
+    },
   ],
 }));
 
@@ -974,6 +1082,100 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           timeoutMs: 30_000,
         });
         return formatSkillResult(result);
+      }
+
+      // ============ P2 · 健康度监控（直接调用 lib，不走 fork） ============
+      case 'health_monitor_record_event': {
+        const hm = await requireLib(HEALTH_MONITOR_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await hm.init({ projectRoot: proj });
+        const r = await hm.recordEvent(args.eventType, args.payload ?? {});
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ health-monitor.recordEvent\n\n类型: ${args.eventType}\n事件ID: ${r.id}\n时间戳: ${r.timestamp}\n\n📦 Data:\n${JSON.stringify(r, null, 2)}`,
+          }],
+        };
+      }
+
+      case 'health_monitor_check': {
+        const hm = await requireLib(HEALTH_MONITOR_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await hm.init({ projectRoot: proj });
+        const r = await hm.checkThresholds({ scanNpm: args.scanNpm !== false });
+        const alertBlock = r.count > 0
+          ? `\n\n🚨 告警 (${r.count}):\n${r.alerts.map((a: any) => `  · [${a.level}] ${a.code}: ${a.message}`).join('\n')}`
+          : '\n\n✅ 无告警，所有指标在阈值内';
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ health-monitor.checkThresholds\n\n检查时间: ${r.checkedAt}\n整体状态: ${r.healthy ? '健康' : '存在告警'}${alertBlock}\n\n📦 指标概览:\n${JSON.stringify(r.metricsSummary, null, 2)}`,
+          }],
+        };
+      }
+
+      case 'health_monitor_dashboard': {
+        const hm = await requireLib(HEALTH_MONITOR_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await hm.init({ projectRoot: proj });
+        const fmt = args.format ?? 'markdown';
+        const content = args.weekly
+          ? await hm.getWeeklyReport()
+          : await hm.generateDashboard({ format: fmt, includePackages: args.includePackages !== false });
+        // markdown/json 直接返回 text；HTML 附加为 HTML 内容提示
+        if (fmt === 'html') {
+          return {
+            content: [
+              { type: 'text', text: `✅ health-monitor.dashboard (HTML)\n\n请将下方 HTML 保存为 .html 文件后用浏览器打开，长度 ${content.length} 字符。` },
+              { type: 'text', text: content },
+            ],
+          };
+        }
+        return { content: [{ type: 'text', text: content }] };
+      }
+
+      // ============ P2 · 编排状态机（直接调用 lib，不走 fork） ============
+      case 'orchestrator_status': {
+        const sm = await requireLib(STATE_MACHINE_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await sm.init({ projectRoot: proj });
+        const r = await sm.status();
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ orchestrator.status\n\n当前 Phase: ${r.currentPhase ?? '未启动'}\n已完成步骤: ${r.completedSteps.join(' → ') || '(无)'}\n下一候选: ${r.nextCandidates.map((c: any) => `\n  · ${c.tool} — ${c.reason}`).join('') || '已达最终状态'}\n\n📦 Data:\n${JSON.stringify(r, null, 2)}`,
+          }],
+        };
+      }
+
+      case 'orchestrator_next': {
+        const sm = await requireLib(STATE_MACHINE_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await sm.init({ projectRoot: proj });
+        const r = await sm.next({ autoAdvance: args.autoAdvance === true });
+        const action = args.autoAdvance ? `自动执行: ${r.executed?.tool ?? '(未执行，前置不满足)'}` : '未启用自动执行';
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ orchestrator.next\n\n${action}\n当前 Phase: ${r.currentPhase ?? '未启动'}\n推荐下一步: ${r.recommended?.tool ?? '无需操作'}\n原因: ${r.recommended?.reason ?? ''}\n缺失前置: ${r.missingPreconditions.length ? r.missingPreconditions.join(', ') : '无'}\n\n📦 nextActions:\n${r.nextActions.map((a: any) => `  · ${a}`).join('\n')}`,
+          }],
+        };
+      }
+
+      case 'orchestrator_transition': {
+        const sm = await requireLib(STATE_MACHINE_JS);
+        const proj = args.projectRoot ?? PROJECT_ROOT;
+        await sm.init({ projectRoot: proj });
+        const r = await sm.transition({
+          action: args.action,
+          phase: args.phase,
+        });
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ orchestrator.transition\n\n动作: ${args.action}${args.phase ? ` → Phase ${args.phase}` : ''}\n结果: ${r.message}\n\n📦 Data:\n${JSON.stringify(r, null, 2)}`,
+          }],
+        };
       }
 
       default:

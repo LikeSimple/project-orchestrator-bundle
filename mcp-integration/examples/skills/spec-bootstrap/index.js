@@ -15,6 +15,7 @@
  */
 
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const llm = require('../../lib/llm-client');
 const ast = require('../../lib/ast-parser');
@@ -182,6 +183,10 @@ function slugify(s) {
     .slice(0, 60);
 }
 
+// ============================================================
+// 辅助函数
+// ============================================================
+
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
@@ -192,6 +197,45 @@ async function readIfExists(filePath) {
   } catch {
     return null;
   }
+}
+
+/**
+ * 在 <projectRoot>/specs/ 下寻找第一个包含 spec.md 的子目录，
+ * 返回 feature 目录名（如 "001-test"）或 null。
+ *
+ * 说明：spec-bootstrap 的 specify() 会根据用户输入 slug 生成
+ *       `specs/001-${slug}/spec.md`，因此目录名是不确定的。
+ *       之前硬编码 `specs/001-feature/` 兜底路径会导致 clarify/plan/...
+ *       在使用非 "feature" slug 时找不到 spec.md。
+ */
+function findFirstFeatureDir(cwd) {
+  const specsDir = path.join(cwd, 'specs');
+  try {
+    const entries = fsSync.readdirSync(specsDir, { withFileTypes: true });
+    // 按名字字典序，优先 001-*
+    entries.sort((a, b) => (a.name < b.name ? -1 : 1));
+    for (const dir of entries) {
+      if (!dir.isDirectory()) continue;
+      const specFile = path.join(specsDir, dir.name, 'spec.md');
+      if (fsSync.existsSync(specFile)) return dir.name;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 解析 spec.md 的绝对路径：
+ *   - 传了 specFile（相对或绝对）→ 直接用
+ *   - 否则 findFirstFeatureDir() 找第一个含 spec.md 的目录
+ *   - 最后兜底：specs/001-feature/spec.md（向后兼容）
+ */
+function resolveSpecPath(cwd, specFile) {
+  if (specFile) return path.resolve(cwd, specFile);
+  const dir = findFirstFeatureDir(cwd);
+  if (dir) return path.join(cwd, 'specs', dir, 'spec.md');
+  return path.join(cwd, 'specs', '001-feature', 'spec.md');
 }
 
 async function writeFileSafe(filePath, content) {
@@ -459,9 +503,7 @@ ${generateAcceptanceScenarios(s.title).map(a => `1. ${a}`).join('\n')}
 
 async function clarify({ projectRoot, specFile }) {
   const cwd = projectRoot || process.cwd();
-  const specPath = specFile
-    ? path.resolve(cwd, specFile)
-    : path.join(cwd, 'specs/001-feature/spec.md');
+  const specPath = resolveSpecPath(cwd, specFile);
 
   const content = await readIfExists(specPath);
   if (!content) {
@@ -558,6 +600,16 @@ ${content}
 
   await writeFileSafe(specPath, updated);
 
+  // 写 .clarified 标记文件，让 orchestrator-state-machine 的 S3 检测能通过文件存在性直接命中
+  // （作为 spec.md 中 "已澄清/Clarifications" 字符串检测的双保险）
+  try {
+    const marker = path.join(path.dirname(specPath), '.clarified');
+    await fs.writeFile(marker, JSON.stringify({
+      clarifiedAt: new Date().toISOString(),
+      ambiguitiesCount: ambiguities.length,
+    }, null, 2), 'utf-8');
+  } catch { /* 写标记失败不影响主结果（标记是辅助信息） */ }
+
   return {
     ok: true,
     data: {
@@ -569,6 +621,7 @@ ${content}
       llmEnhanced: llm.isAvailable(),
       llmProvider: llm.getProviderName(),
     },
+    specPath,
     warnings: ambiguities.length > 0 ? [`${ambiguities.length} clarifications needed`] : [],
     nextActions: ambiguities.length > 0
       ? ['Resolve clarifications, then run /spec-bootstrap.plan']
@@ -578,9 +631,7 @@ ${content}
 
 async function plan({ projectRoot, specFile }) {
   const cwd = projectRoot || process.cwd();
-  const specPath = specFile
-    ? path.resolve(cwd, specFile)
-    : path.join(cwd, 'specs/001-feature/spec.md');
+  const specPath = resolveSpecPath(cwd, specFile);
 
   const specContent = await readIfExists(specPath);
   if (!specContent) {
@@ -706,9 +757,15 @@ async function plan({ projectRoot, specFile }) {
 
 async function tasks({ projectRoot, planFile }) {
   const cwd = projectRoot || process.cwd();
-  const planPath = planFile
-    ? path.resolve(cwd, planFile)
-    : path.join(cwd, 'specs/001-feature/plan.md');
+  let planPath;
+  if (planFile) {
+    planPath = path.resolve(cwd, planFile);
+  } else {
+    const dir = findFirstFeatureDir(cwd);
+    planPath = dir
+      ? path.join(cwd, 'specs', dir, 'plan.md')
+      : path.join(cwd, 'specs', '001-feature', 'plan.md');
+  }
 
   const planContent = await readIfExists(planPath);
   if (!planContent) {
@@ -827,9 +884,7 @@ async function tasks({ projectRoot, planFile }) {
 
 async function checklist({ projectRoot, specFile }) {
   const cwd = projectRoot || process.cwd();
-  const specPath = specFile
-    ? path.resolve(cwd, specFile)
-    : path.join(cwd, 'specs/001-feature/spec.md');
+  const specPath = resolveSpecPath(cwd, specFile);
 
   const specContent = await readIfExists(specPath);
   if (!specContent) {

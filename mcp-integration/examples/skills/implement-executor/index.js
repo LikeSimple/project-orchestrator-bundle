@@ -46,8 +46,9 @@ const execAsync = promisify(exec);
 // ============================================================
 
 function parseTaskFromTasksMd(tasksContent, taskId) {
-  // 匹配 "- [ ] T015 [P] [US1] 实现登录中间件 src/middleware/auth.ts"
-  const regex = new RegExp(`-\\s*\\[([ xX])\\]\\s*(${taskId})\\s*(\\[P\\])?\\s*(\\[US\\d+\\])?\\s*(.+?)(?:\\s+([\\w\\-\\/\\.]+\\.\\w+))?$`, 'm');
+  // 匹配 "- [ ] T015 [P] [US1] [backend] 实现登录中间件 src/middleware/auth.ts"
+  // [frontend]/[backend]/[shared] 为前后端协同标记（v9 新增，可选）
+  const regex = new RegExp(`-\\s*\\[([ xX])\\]\\s*(${taskId})\\s*(\\[P\\])?\\s*(\\[US\\d+\\])?\\s*(\\[(?:frontend|backend|shared)\\])?\\s*(.+?)(?:\\s+([\\w\\-\\/\\.]+\\.\\w+))?$`, 'm');
   const match = regex.exec(tasksContent);
   if (!match) return null;
 
@@ -56,14 +57,15 @@ function parseTaskFromTasksMd(tasksContent, taskId) {
     done: match[1].toLowerCase() === 'x',
     parallel: !!match[3],
     storyId: match[4] || null,
-    description: match[5].trim(),
-    filePath: match[6] ? match[6].trim() : null,
+    side: parseSideTag(match[5]),
+    description: match[6].trim(),
+    filePath: match[7] ? match[7].trim() : null,
   };
 }
 
 function extractAllTasks(tasksContent) {
   const tasks = [];
-  const regex = /-\s*\[([ xX])\]\s*(T\d+)\s*(\[P\])?\s*(\[US\d+\])?\s*(.+?)(?:\s+([\w\-\/\.]+\.\w+))?$/gm;
+  const regex = /-\s*\[([ xX])\]\s*(T\d+)\s*(\[P\])?\s*(\[US\d+\])?\s*(\[(?:frontend|backend|shared)\])?\s*(.+?)(?:\s+([\w\-\/\.]+\.\w+))?$/gm;
   let match;
   while ((match = regex.exec(tasksContent)) !== null) {
     tasks.push({
@@ -71,11 +73,23 @@ function extractAllTasks(tasksContent) {
       done: match[1].toLowerCase() === 'x',
       parallel: !!match[3],
       storyId: match[4] || null,
-      description: match[5].trim(),
-      filePath: match[6] ? match[6].trim() : null,
+      side: parseSideTag(match[5]),
+      description: match[6].trim(),
+      filePath: match[7] ? match[7].trim() : null,
     });
   }
   return tasks;
+}
+
+/**
+ * 解析 [frontend]/[backend]/[shared] 标记为 side 字段
+ * @param {string|null} raw - 形如 "[frontend]" 或 null
+ * @returns {'frontend'|'backend'|'shared'|null}
+ */
+function parseSideTag(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/^\[(frontend|backend|shared)\]$/i);
+  return m ? m[1].toLowerCase() : null;
 }
 
 function extractFilePath(description) {
@@ -111,7 +125,7 @@ function parsePhases(tasksContent) {
   const phases = [];
   const lines = tasksContent.split('\n');
   let currentPhase = null;
-  const taskRegex = /-\s*\[([ xX])\]\s*(T\d+)\s*(\[P\])?\s*(\[US\d+\])?\s*(.+?)(?:\s+([\w\-\/\.]+\.\w+))?$/;
+  const taskRegex = /-\s*\[([ xX])\]\s*(T\d+)\s*(\[P\])?\s*(\[US\d+\])?\s*(\[(?:frontend|backend|shared)\])?\s*(.+?)(?:\s+([\w\-\/\.]+\.\w+))?$/;
 
   for (const line of lines) {
     // 匹配 "## Phase N: 名称" / "## Phase N - 名称" / "## Phase N"
@@ -134,8 +148,9 @@ function parsePhases(tasksContent) {
         done: taskMatch[1].toLowerCase() === 'x',
         parallel: !!taskMatch[3],
         storyId: taskMatch[4] || null,
-        description: taskMatch[5].trim(),
-        filePath: taskMatch[6] ? taskMatch[6].trim() : null,
+        side: parseSideTag(taskMatch[5]),
+        description: taskMatch[6].trim(),
+        filePath: taskMatch[7] ? taskMatch[7].trim() : null,
       };
       if (currentPhase) {
         currentPhase.tasks.push(task);
@@ -522,16 +537,26 @@ export default { ${safeId} };
 // ============================================================
 
 async function runTests(cwd) {
-  // 尝试检测测试命令
-  let testCmd = null;
+  // 1. 先检测组合栈项目（apps/web + apps/api 同时存在 test:web/test:api 脚本）
+  //    v9 新增：前后端协同项目分别跑前后端测试，单端任一失败即整体失败
+  let pkg = null;
   try {
-    const pkg = JSON.parse(await fs.readFile(path.join(cwd, 'package.json'), 'utf-8'));
-    if (pkg.scripts?.test) {
+    pkg = JSON.parse(await fs.readFile(path.join(cwd, 'package.json'), 'utf-8'));
+  } catch { /* no package.json - 走单端逻辑 */ }
+
+  if (pkg && pkg.scripts && pkg.scripts['test:web'] && pkg.scripts['test:api']) {
+    return await runCompositeTests(cwd);
+  }
+
+  // 2. 单端项目：原有逻辑
+  let testCmd = null;
+  if (pkg && pkg.scripts) {
+    if (pkg.scripts.test) {
       testCmd = 'npm test --silent';
-    } else if (pkg.scripts?.['test:unit']) {
+    } else if (pkg.scripts['test:unit']) {
       testCmd = 'npm run test:unit --silent';
     }
-  } catch { /* no package.json */ }
+  }
 
   if (!testCmd) {
     return { passed: true, skipped: true, reason: 'No test command found' };
@@ -558,6 +583,56 @@ async function runTests(cwd) {
       command: testCmd,
     };
   }
+}
+
+/**
+ * 组合栈项目测试执行器：分别跑前端 (test:web) 和后端 (test:api) 测试。
+ * v9 新增：前后端协同项目的测试门禁。
+ *
+ * 返回结构与 runTests 一致，额外附带 sides 字段标识两端结果。
+ * 任一端失败即整体 passed=false，但另一端结果仍完整保留以便诊断。
+ */
+async function runCompositeTests(cwd) {
+  const sides = {};
+  const outputs = [];
+  let allPassed = true;
+  let anySkipped = false;
+
+  for (const [side, script] of [['frontend', 'test:web'], ['backend', 'test:api']]) {
+    const cmd = `npm run ${script} --silent`;
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { cwd, timeout: 90_000 });
+      const output = stdout + stderr;
+      const failed = /FAIL|failed|failures|✗|✘/i.test(output);
+      sides[side] = {
+        passed: !failed,
+        skipped: false,
+        command: cmd,
+        output: output.split('\n').slice(-10).join('\n'),
+      };
+      outputs.push(`--- ${side} (${cmd}) ---\n${output.split('\n').slice(-8).join('\n')}`);
+      if (failed) allPassed = false;
+    } catch (err) {
+      const out = (err.stdout || '') + (err.stderr || '');
+      sides[side] = {
+        passed: false,
+        skipped: false,
+        error: err.message,
+        command: cmd,
+        output: out.split('\n').slice(-10).join('\n'),
+      };
+      outputs.push(`--- ${side} (${cmd}) FAILED ---\n${out.split('\n').slice(-8).join('\n')}`);
+      allPassed = false;
+    }
+  }
+
+  return {
+    passed: allPassed,
+    skipped: anySkipped && allPassed,
+    output: outputs.join('\n\n').split('\n').slice(-15).join('\n'),
+    command: 'npm run test:web && npm run test:api',
+    sides,
+  };
 }
 
 // ============================================================
@@ -1911,8 +1986,11 @@ module.exports = {
   cleanGeneratedCode,
   // 辅助函数导出（便于复用/测试）
   parsePhases,
+  parseSideTag,
   executeTaskWithRetry,
   runCheckpoint,
+  runTests,
+  runCompositeTests,
   saveState,
   loadState,
   generateReport,

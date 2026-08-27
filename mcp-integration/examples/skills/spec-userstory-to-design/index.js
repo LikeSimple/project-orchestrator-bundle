@@ -210,7 +210,7 @@ function extractPagesHeuristic(featureName, stories, featureCode) {
 /**
  * LLM 智能提取页面和跳转关系
  */
-async function extractPagesWithLLM(featureName, stories) {
+async function extractPagesWithLLM(featureName, stories, prototypeStructure = null) {
   if (!llm.isAvailable()) return null;
 
   try {
@@ -218,6 +218,22 @@ async function extractPagesWithLLM(featureName, stories) {
       id: s.id, title: s.title, priority: s.priority,
       scenarios: s.scenarios.slice(0, 5),
     })), null, 2);
+
+    // 若 prototype 已提供，提取其结构作为页面推导的对齐上下文
+    let prototypeContext = '';
+    if (prototypeStructure && prototypeStructure.hasPrototype) {
+      const fields = prototypeStructure.formFields || [];
+      const classes = prototypeStructure.classes || [];
+      const fieldsSummary = fields.slice(0, 15).map(f => `${f.name || f.id || 'unnamed'}(${f.type || 'text'})`).join(', ');
+      const classesSummary = classes.slice(0, 20).join(', ');
+      prototypeContext = `
+
+## Prototype 上下文（UI 原型已生成，页面推导需对齐）
+- prototype 路径: ${prototypeStructure.path}
+- 表单字段: ${fieldsSummary || '无'}
+- 主要 CSS 类: ${classesSummary || '无'}
+- 要求：推导的页面应覆盖上述 prototype 中的表单字段与区块结构，避免遗漏原型中已出现的页面元素。`;
+    }
 
     const result = await llm.callLLM({
       system: `你是资深交互设计师，负责从 User Story 中提取页面和跳转关系。
@@ -243,6 +259,7 @@ ${featureName}
 \`\`\`json
 ${storiesJson}
 \`\`\`
+${prototypeContext}
 
 请基于以上 User Story，推导出完整的页面列表和页面间跳转关系。
 确保覆盖所有核心 User Story 的主要场景。`,
@@ -487,7 +504,7 @@ sequenceDiagram
 
 | Operation ID | Method | Path | 关联按钮 | 说明 |
 |---|---|---|---|---|
-| ${opPrefix}List | GET | /api/v1/${resource} | B-002, B-004 | 列表/查询 |
+| ${`list${capitalize(opPrefix)}s`} | GET | /api/v1/${resource} | B-002, B-004 | 列表/查询 |
 | ${page.type === 'create' ? `create${capitalize(opPrefix)}` : page.type === 'edit' ? `update${capitalize(opPrefix)}` : `get${capitalize(opPrefix)}`} | ${page.type === 'create' ? 'POST' : page.type === 'edit' ? 'PUT' : 'GET'} | /api/v1/${resource}${page.type === 'create' ? '' : '/:id'} | B-003 | ${page.type === 'create' ? '创建' : page.type === 'edit' ? '更新' : '获取详情'} |
 ${page.type === 'detail' ? `| delete${capitalize(opPrefix)} | DELETE | /api/v1/${resource}/:id | B-004 | 删除` : ''}
 
@@ -1222,7 +1239,7 @@ async function validateDesignArtifactsAST(dir, files) {
 // 主命令：generate
 // ============================================================
 
-async function generate({ projectRoot, featureName, specFile, format = 'all', outputDir: outputDirInput, featureCode }) {
+async function generate({ projectRoot, featureName, specFile, format = 'all', outputDir: outputDirInput, featureCode, prototypeFile }) {
   const cwd = projectRoot || process.cwd();
 
   if (!featureName) {
@@ -1236,6 +1253,29 @@ async function generate({ projectRoot, featureName, specFile, format = 'all', ou
     specContent = await fs.readFile(specPath, 'utf-8');
   } catch {
     return { ok: false, error: `spec.md not found: ${specPath}`, data: { llmEnhanced: false, llmProvider: null }, warnings: [], nextActions: [] };
+  }
+
+  // 1.5 可选：解析 prototype HTML 提取页面结构（契约要求的 prototype/index.html）
+  // 对齐 SKILL.md 契约：spec-userstory-to-design requires spec.md + prototype/index.html
+  let prototypeStructure = null;
+  if (prototypeFile) {
+    try {
+      const protoPath = path.resolve(cwd, prototypeFile);
+      const html = await fs.readFile(protoPath, 'utf-8');
+      const astParser = require('../../lib/ast-parser');
+      const root = astParser.parseHTML(html);
+      const formFields = astParser.extractFormFields(root).slice(0, 20);
+      const classes = astParser.extractAllClasses(root).slice(0, 30);
+      prototypeStructure = {
+        path: protoPath,
+        formFields,
+        classes,
+        hasPrototype: true,
+      };
+    } catch {
+      // prototype 不可读/解析失败时不阻塞，仅记录
+      prototypeStructure = { hasPrototype: false, path: prototypeFile };
+    }
   }
 
   // 2. 提取 User Stories
@@ -1255,7 +1295,7 @@ async function generate({ projectRoot, featureName, specFile, format = 'all', ou
   let llmProvider = null;
   let llmEnhanced = false;
 
-  const llmResult = await extractPagesWithLLM(featureName, stories);
+  const llmResult = await extractPagesWithLLM(featureName, stories, prototypeStructure);
   if (llmResult) {
     pages = llmResult.pages;
     edges = llmResult.edges;
@@ -1357,6 +1397,8 @@ ${pageFlowContent}
         : undefined,
       llmEnhanced,
       llmProvider: llmEnhanced ? llmProvider : null,
+      prototypeUsed: !!(prototypeStructure && prototypeStructure.hasPrototype),
+      prototypePath: prototypeStructure ? prototypeStructure.path : null,
     },
     warnings: llmEnhanced ? [] : ['LLM not available, using heuristic generation'],
     nextActions: [
@@ -1560,4 +1602,324 @@ async function validate({ projectRoot, designDir, strict = false }) {
   };
 }
 
-module.exports = { generate, validate };
+// ============================================================
+// 主命令：refineLogic —— 交互式细化接口内部逻辑
+// ============================================================
+//
+// 输入：
+//   projectRoot  项目根目录
+//   featureCode  特征码（如 '001-test'），用于定位 docs/design/<featureCode>/
+//   operationId  要细化的接口 ID（必填）
+//   featureName  可选，显示名（默认用 featureCode）
+//   scenarios    可选，用户提供的场景列表 [{type:'happy|error|edge', name, given, when, then}]
+//   complexity   可选，复杂度信号 { stateful, multiParty, branching, longTx }
+//   outputDir    可选，默认 <projectRoot>/docs/design/<featureCode>/logic
+//
+// 输出：
+//   docs/design/<featureCode>/logic/<operationId>.md
+//   含：场景列表 + 状态机图 + 时序图 + 决策表 + 异常分支表
+//
+// 启发式兜底（无 scenarios 输入）：
+//   - 1 个 happy + 2 个 error + 1 个 edge 场景
+//   - 基础状态机（待处理 → 处理中 → 已完成/失败）
+//   - 基础时序图（Client → API → Service → DB）
+//   - 决策表模板（条件组合 → 动作）
+
+function heuristicScenarios(operationId, sig) {
+  const scenes = [
+    {
+      type: 'happy',
+      name: `${operationId} 正常流`,
+      given: '用户已认证且输入合法',
+      when: `调用 ${operationId}`,
+      then: '业务规则全部满足，返回成功结果',
+    },
+    {
+      type: 'error',
+      name: `${operationId} 参数校验失败`,
+      given: '请求体含非法字段',
+      when: `调用 ${operationId}`,
+      then: '返回 400 + RFC 9457 Problem 详情',
+    },
+    {
+      type: 'error',
+      name: `${operationId} 业务规则冲突`,
+      given: '资源状态不允许此操作',
+      when: `调用 ${operationId}`,
+      then: '返回 409 + 业务错误码 + 是否可重试标记',
+    },
+    {
+      type: 'edge',
+      name: `${operationId} 并发场景`,
+      given: '两个请求同时修改同一资源',
+      when: `调用 ${operationId}`,
+      then: '后到请求应失败或走乐观锁/悲观锁',
+    },
+  ];
+  if (sig.longTx) {
+    scenes.push({
+      type: 'edge',
+      name: `${operationId} 长事务中断`,
+      given: '事务执行到一半进程崩溃',
+      when: `调用 ${operationId}`,
+      then: '补偿事务应回滚已执行步骤',
+    });
+  }
+  return scenes;
+}
+
+function buildStateDiagram(operationId) {
+  return [
+    'stateDiagram-v2',
+    '    [*] --> 待处理',
+    `    待处理 --> 处理中: 触发 ${operationId}`,
+    '    处理中 --> 已完成: 成功',
+    '    处理中 --> 失败: 异常',
+    '    失败 --> 待处理: 重试（可选）',
+    '    已完成 --> [*]',
+    '    失败 --> [*]',
+  ].join('\n');
+}
+
+function buildSequenceDiagram(operationId, sig) {
+  const lines = [
+    'sequenceDiagram',
+    '    participant C as Client',
+    '    participant A as API',
+    '    participant S as Service',
+    '    participant D as DB',
+    `    C->>A: ${operationId}`,
+    '    A->>S: validate()',
+    '    S->>D: read',
+    '    D-->>S: entity',
+    '    S->>D: write',
+    '    D-->>S: ok',
+    '    S-->>A: result',
+    '    A-->>C: 200 OK',
+  ];
+  if (sig.longTx) {
+    lines.push('    Note over S,D: 长事务：失败时走补偿');
+  }
+  return lines.join('\n');
+}
+
+function buildDecisionTable(operationId) {
+  return [
+    '| # | 输入条件 | 业务规则 | 动作 | 输出 |',
+    '|---|---|---|---|---|',
+    `| 1 | 输入合法 + 状态允许 | 满足 | 执行 ${operationId} | 200 |`,
+    '| 2 | 输入合法 + 状态冲突 | 不满足 | 拒绝 | 409 |',
+    '| 3 | 输入非法 | 校验失败 | 拒绝 | 400 |',
+    '| 4 | 未认证 | 鉴权失败 | 拒绝 | 401 |',
+    '| 5 | 无权限 | 授权失败 | 拒绝 | 403 |',
+    '| 6 | 资源不存在 | 不满足 | 拒绝 | 404 |',
+    '| 7 | 内部异常 | 兜底 | 记录 traceId | 500 |',
+  ].join('\n');
+}
+
+function buildErrorBranches(scenes) {
+  const errScenes = scenes.filter(s => s.type === 'error' || s.type === 'edge');
+  const lines = [
+    '| 场景 | HTTP 状态 | 业务码 | 是否可重试 | 补偿动作 |',
+    '|---|---|---|---|---|',
+  ];
+  errScenes.forEach((s, i) => {
+    const code = s.type === 'error' && /参数|input/i.test(s.name) ? '400' : '409';
+    lines.push(`| ${s.name} | ${code} | E${1000 + i} | ${s.type === 'edge' ? '是' : '否'} | - |`);
+  });
+  return lines.join('\n');
+}
+
+function buildLogicDoc({ featureName, operationId, sig, sceneList, stateDiagram, sequenceDiagram, decisionTable, errorBranches }) {
+  const sections = [];
+  sections.push(`# Logic Detail: ${operationId}`);
+  sections.push('');
+  sections.push('> 自动生成（来自 spec-userstory-to-design / refineLogic）');
+  sections.push(`> 生成日期：${timestamp()}`);
+  sections.push('');
+  sections.push(`**功能模块**: ${featureName}`);
+  sections.push(`**接口 ID**: \`${operationId}\``);
+  sections.push(`**复杂度信号**: stateful=${sig.stateful}, multiParty=${sig.multiParty}, branching=${sig.branching}, longTx=${sig.longTx}`);
+  sections.push('');
+  sections.push('---');
+  sections.push('');
+  sections.push('## 1. 场景列表');
+  sections.push('');
+  sections.push('| # | 类型 | 场景名 | Given | When | Then |');
+  sections.push('|---|---|---|---|---|---|');
+  sceneList.forEach((s, i) => {
+    sections.push(`| ${i + 1} | ${s.type} | ${s.name} | ${s.given} | ${s.when} | ${s.then} |`);
+  });
+  sections.push('');
+  if (stateDiagram) {
+    sections.push('## 2. 状态机图');
+    sections.push('');
+    sections.push('```mermaid');
+    sections.push(stateDiagram);
+    sections.push('```');
+    sections.push('');
+  }
+  if (sequenceDiagram) {
+    sections.push('## 3. 时序图');
+    sections.push('');
+    sections.push('```mermaid');
+    sections.push(sequenceDiagram);
+    sections.push('```');
+    sections.push('');
+  }
+  if (decisionTable) {
+    sections.push('## 4. 决策表');
+    sections.push('');
+    sections.push(decisionTable);
+    sections.push('');
+  }
+  sections.push('## 5. 异常分支表');
+  sections.push('');
+  sections.push(errorBranches);
+  sections.push('');
+  sections.push('---');
+  sections.push('');
+  sections.push('## 6. 细化进度');
+  sections.push('');
+  sections.push('- [ ] 每个场景都有 Given/When/Then');
+  sections.push('- [ ] 状态机覆盖所有状态转换');
+  sections.push('- [ ] 时序图标注失败分支');
+  sections.push('- [ ] 决策表填全所有条件组合');
+  sections.push('- [ ] 异常分支表确定 HTTP 状态 + 业务码 + 重试策略');
+  sections.push('');
+  return sections.join('\n');
+}
+
+// LLM 增强路径：为 operationId 生成覆盖更全面的场景列表
+// 成功返回 [{type,name,given,when,then}]，失败返回 null（调用方回退到 heuristicScenarios）
+async function generateScenariosViaLLM(operationId, sig, featureName) {
+  const result = await llm.callLLM({
+    system: `你是一位资深架构师，擅长为 API 接口设计测试场景与异常分支。
+你的任务是为给定 operationId 生成覆盖全面的场景列表（正常流、错误流、边界场景）。
+输出要求：
+1. 只输出 JSON 格式，不要任何解释性文字或 markdown 代码块标记
+2. JSON 结构：{"scenarios":[{"type":"happy|error|edge","name":"场景名","given":"前置条件","when":"触发动作","then":"预期结果"}]}
+3. 至少 5 个场景，按 happy → error → edge 顺序
+4. 错误场景覆盖：参数校验失败、未授权、资源不存在、业务规则冲突、并发冲突
+5. 边界场景考虑并发、长事务中断与补偿（若 longTx=true）、限流`,
+    messages: [{
+      role: 'user',
+      content: `为接口 "${operationId}"（功能模块: ${featureName || '未指定'}）生成场景列表。
+复杂度信号：stateful=${sig.stateful}, multiParty=${sig.multiParty}, branching=${sig.branching}, longTx=${sig.longTx}
+${sig.longTx ? '注意：longTx=true，须包含长事务中断与补偿场景。' : ''}`,
+    }],
+    maxTokens: 2048,
+    temperature: 0.3,
+  });
+  if (!result.ok) return null;
+  try {
+    const cleaned = result.content.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const scenes = Array.isArray(parsed.scenarios) ? parsed.scenarios : [];
+    return scenes
+      .filter(s => s && s.name && s.given && s.when && s.then)
+      .map(s => ({
+        type: ['happy', 'error', 'edge'].includes(s.type) ? s.type : 'happy',
+        name: String(s.name),
+        given: String(s.given),
+        when: String(s.when),
+        then: String(s.then),
+      }));
+  } catch {
+    return null;
+  }
+}
+
+async function refineLogic({ projectRoot, featureCode, operationId, featureName, scenarios, complexity, outputDir }) {
+  const cwd = projectRoot || process.cwd();
+
+  // 1. 参数校验
+  if (!operationId) {
+    return { ok: false, error: 'operationId is required', data: { llmEnhanced: false, llmProvider: null }, warnings: [], nextActions: [] };
+  }
+
+  // 2. 定位输出目录
+  const slug = featureCode ? featureCode.toLowerCase() : (featureName ? slugify(featureName) : 'feature');
+  const designDir = outputDir ? path.resolve(cwd, outputDir) : path.join(cwd, 'docs', 'design', slug);
+  const logicDir = path.join(designDir, 'logic');
+  await fs.mkdir(logicDir, { recursive: true });
+
+  // 3. 复杂度信号（决定生成哪些图）
+  const sig = Object.assign({
+    stateful: true,       // 有状态转换 → 生成状态机图
+    multiParty: true,     // 多方协作 → 生成时序图
+    branching: true,      // 多条件分支 → 生成决策表
+    longTx: false,        // 长事务 → 额外标注补偿/重试
+  }, complexity || {});
+
+  // 4. 场景列表（用户提供则用；否则 LLM 增强 → 启发式兜底）
+  let llmEnhanced = false;
+  let llmProvider = null;
+  let sceneList;
+  if (Array.isArray(scenarios) && scenarios.length > 0) {
+    sceneList = scenarios;
+  } else if (llm.isAvailable()) {
+    const llmScenes = await generateScenariosViaLLM(operationId, sig, featureName).catch(() => null);
+    if (llmScenes && llmScenes.length > 0) {
+      sceneList = llmScenes;
+      llmEnhanced = true;
+      llmProvider = llm.getProviderName();
+    } else {
+      sceneList = heuristicScenarios(operationId, sig);
+    }
+  } else {
+    sceneList = heuristicScenarios(operationId, sig);
+  }
+
+  // 5. 生成各类图（依据复杂度信号）
+  const stateDiagram = sig.stateful ? buildStateDiagram(operationId) : null;
+  const sequenceDiagram = sig.multiParty ? buildSequenceDiagram(operationId, sig) : null;
+  const decisionTable = sig.branching ? buildDecisionTable(operationId) : null;
+  const errorBranches = buildErrorBranches(sceneList);
+
+  // 6. 拼装文档
+  const md = buildLogicDoc({
+    featureName: featureName || slug,
+    operationId,
+    sig,
+    sceneList,
+    stateDiagram,
+    sequenceDiagram,
+    decisionTable,
+    errorBranches,
+  });
+
+  // 7. 写文件
+  const logicFile = path.join(logicDir, `${operationId}.md`);
+  await fs.writeFile(logicFile, md, 'utf-8');
+
+  const diagramCount = [!!stateDiagram, !!sequenceDiagram, !!decisionTable].filter(Boolean).length;
+
+  return {
+    ok: true,
+    data: {
+      summary: `✅ Refined logic for "${operationId}" (${sceneList.length} scenarios, ${diagramCount}/3 diagrams)`,
+      outputDir: logicDir,
+      file: logicFile,
+      operationId,
+      scenariosCount: sceneList.length,
+      diagrams: {
+        stateDiagram: !!stateDiagram,
+        sequenceDiagram: !!sequenceDiagram,
+        decisionTable: !!decisionTable,
+      },
+      complexity: sig,
+      llmEnhanced,
+      llmProvider,
+    },
+    warnings: llmEnhanced ? [] : ['未启用 LLM 增强：场景列表为启发式生成，建议人工补充业务特定场景'],
+    nextActions: [
+      `Review ${operationId}.md to validate scenarios`,
+      'Fill decision table with real condition combinations',
+      'Cross-check state machine against openapi.yaml error responses',
+      'Run /design.validate to ensure coverage',
+    ],
+  };
+}
+
+module.exports = { generate, validate, refineLogic };

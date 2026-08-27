@@ -4192,6 +4192,44 @@ const STACK_LANGUAGE = {
   'python-lib': 'python',
 };
 
+// 前后端分离组合栈（monorepo 结构）：
+//   key 为 `${frontend}+${backend}`；任意 frontend+backend 组合皆可，
+//   未列出的组合走默认 apps/web + apps/api 目录。
+// 调用方式：/scaffold --stack=react-vite+spring-boot
+// 预设组合均使用内置 TEMPLATES 子栈，沙箱环境/CI 下无需外部 CLI 即可生成。
+// 用户也可传 SCAFFOLD_COMMANDS 形式的栈名（如 vue-vite、nextjs、nest、rust 等），
+// 单栈 run() 会自动尝试外部脚手架，调用方环境需具备对应 CLI。
+const COMPOSITE_TEMPLATES = {
+  'react-vite+spring-boot': {
+    frontend: 'react-vite',
+    backend: 'spring-boot',
+    frontendDir: 'apps/web',
+    backendDir: 'apps/api',
+    description: 'React + Vite + Spring Boot 前后端分离（pnpm workspace）',
+  },
+  'react-vite+nestjs-api': {
+    frontend: 'react-vite',
+    backend: 'nestjs-api',
+    frontendDir: 'apps/web',
+    backendDir: 'apps/api',
+    description: 'React + Vite + NestJS 前后端分离',
+  },
+  'vue3-vite+spring-boot': {
+    frontend: 'vue3-vite',
+    backend: 'spring-boot',
+    frontendDir: 'apps/web',
+    backendDir: 'apps/api',
+    description: 'Vue 3 + Vite + Spring Boot 前后端分离',
+  },
+  'react-vite+fastapi': {
+    frontend: 'react-vite',
+    backend: 'fastapi',
+    frontendDir: 'apps/web',
+    backendDir: 'apps/api',
+    description: 'React + Vite + FastAPI 前后端分离',
+  },
+};
+
 /**
  * run 命令 - 运行脚手架（增强版）
  *
@@ -4219,6 +4257,11 @@ async function run(params) {
   // 参数校验
   if (!templateName) {
     return makeResult(false, null, '缺少必填字段：stack 或 template', ['请指定技术栈或模板名称，如 --stack=react-vite']);
+  }
+
+  // 组合栈分流：stack 含 '+' 视为前后端分离组合栈（如 react-vite+spring-boot）
+  if (typeof templateName === 'string' && templateName.includes('+')) {
+    return await runComposite({ ...params, compositeStack: templateName, projectName });
   }
 
   const pmValidation = Validators.validatePackageManager(packageManager);
@@ -4511,6 +4554,275 @@ async function run(params) {
     },
     null,
     llmWarnings,
+    llmEnhanced,
+    nextActions
+  );
+}
+
+// ============================================================
+// 第七部分附录：runComposite - 前后端分离组合栈（monorepo）
+// ============================================================
+
+/**
+ * runComposite - 前后端分离组合栈执行器
+ *
+ * 接收 `${frontend}+${backend}` 形式的 compositeStack，依次：
+ *   1. 拆分组合栈，解析 frontend/backend 和对应子目录
+ *   2. 在 outputDir 下创建 apps/web 和 apps/api（或 COMPOSITE_TEMPLATES 指定目录）
+ *   3. 递归调用 run() 生成前端工程到 apps/web、后端工程到 apps/api
+ *   4. 生成 monorepo 根文件：package.json、pnpm-workspace.yaml、README.md
+ *
+ * 子工程参数继承自父调用（packageManager/options/projectRoot）；
+ * installDeps 默认不执行（CI 加速），可由 options.installDeps 显式开启。
+ */
+async function runComposite(params) {
+  const {
+    compositeStack,
+    name,
+    projectName: pn,
+    packageManager = 'pnpm',
+    projectRoot,
+    options = {},
+  } = params;
+
+  const projectName = name || pn || '.';
+
+  // 1. 解析组合栈
+  const [frontend, backend] = String(compositeStack).split('+').map(s => s && s.trim());
+  if (!frontend || !backend || frontend.includes('+') || backend.includes('+')) {
+    return makeResult(
+      false,
+      null,
+      `无效的组合栈：${compositeStack}`,
+      ['格式应为 frontend+backend，如 react-vite+spring-boot']
+    );
+  }
+
+  const preset = COMPOSITE_TEMPLATES[compositeStack] || {};
+  const frontendDir = preset.frontendDir || 'apps/web';
+  const backendDir = preset.backendDir || 'apps/api';
+  const description = preset.description || `${frontend}+${backend} 前后端分离`;
+
+  // 校验子栈受支持
+  const feKnown = !!TEMPLATES[frontend] || !!SCAFFOLD_COMMANDS[frontend];
+  const beKnown = !!TEMPLATES[backend] || !!SCAFFOLD_COMMANDS[backend];
+  if (!feKnown || !beKnown) {
+    const available = [...new Set([...Object.keys(TEMPLATES), ...Object.keys(SCAFFOLD_COMMANDS)])].sort();
+    return makeResult(
+      false,
+      null,
+      `组合栈子栈不受支持：${!feKnown ? frontend : ''} ${!beKnown ? backend : ''}`.trim(),
+      [`可用单栈：${available.join(', ')}`]
+    );
+  }
+
+  const cwd = projectRoot || process.cwd();
+  const rootDir = projectName === '.' ? cwd : path.join(cwd, projectName);
+
+  // 2. 目标根目录检查
+  const dirValidation = await Validators.validateTargetDir(rootDir, options.force);
+  if (!dirValidation.valid) {
+    return makeResult(false, null, dirValidation.error, [dirValidation.suggestion || '']);
+  }
+
+  await ensureDir(rootDir);
+  const feOutputDir = path.join(rootDir, frontendDir);
+  const beOutputDir = path.join(rootDir, backendDir);
+
+  // 子工程选项：默认不安装依赖（CI 加速），但保留 git/llmEnhance 等设置
+  const subOptions = {
+    ...options,
+    installDeps: false, // 由根 workspace 统一安装
+    force: true,        // 子目录已由上层创建
+  };
+
+  // 3. 递归调用 run() 生成前端与后端子工程
+  const subResults = [];
+  const warnings = [];
+  let llmEnhanced = false;
+  let totalFiles = 0;
+  let feResult = null;
+  let beResult = null;
+
+  // 前端
+  try {
+    feResult = await run({
+      stack: frontend,
+      name: '.',
+      packageManager,
+      projectRoot: feOutputDir,
+      options: subOptions,
+    });
+    subResults.push({ side: 'frontend', stack: frontend, ok: !!feResult.ok, dir: frontendDir });
+    if (feResult.ok && feResult.data) {
+      totalFiles += feResult.data.fileCount || 0;
+      if (feResult.data.llmEnhanced) llmEnhanced = true;
+    } else if (feResult.error) {
+      warnings.push(`前端 ${frontend} 生成失败：${feResult.error}`);
+    }
+  } catch (e) {
+    warnings.push(`前端 ${frontend} 异常：${e.message?.slice(0, 200) || '未知错误'}`);
+  }
+
+  // 后端
+  try {
+    beResult = await run({
+      stack: backend,
+      name: '.',
+      packageManager,
+      projectRoot: beOutputDir,
+      options: subOptions,
+    });
+    subResults.push({ side: 'backend', stack: backend, ok: !!beResult.ok, dir: backendDir });
+    if (beResult.ok && beResult.data) {
+      totalFiles += beResult.data.fileCount || 0;
+      if (beResult.data.llmEnhanced) llmEnhanced = true;
+    } else if (beResult.error) {
+      warnings.push(`后端 ${backend} 生成失败：${beResult.error}`);
+    }
+  } catch (e) {
+    warnings.push(`后端 ${backend} 异常：${e.message?.slice(0, 200) || '未知错误'}`);
+  }
+
+  // 4. 生成 monorepo 根文件
+  const rootFiles = [];
+
+  // 4.1 根 package.json（workspace 声明）
+  const rootPkgJson = {
+    name: projectName === '.' ? path.basename(rootDir) : projectName,
+    version: '0.1.0',
+    private: true,
+    description: `${description} monorepo`,
+    workspaces: [frontendDir, backendDir],
+    scripts: {
+      'dev:web': `npm --prefix ${frontendDir} run dev`,
+      'dev:api': (() => {
+        // 后端启动命令依栈而异
+        if (backend === 'spring-boot') return `cd ${backendDir} && ./mvnw spring-boot:run`;
+        if (backend === 'fastapi') return `cd ${backendDir} && uvicorn main:app --reload`;
+        if (backend === 'nest') return `npm --prefix ${backendDir} run start:dev`;
+        if (backend === 'dotnet-webapi') return `cd ${backendDir} && dotnet run`;
+        if (backend === 'rust') return `cd ${backendDir} && cargo run`;
+        return `npm --prefix ${backendDir} run dev`;
+      })(),
+      'dev': 'concurrently "npm:dev:web" "npm:dev:api"',
+      'test:web': `npm --prefix ${frontendDir} test`,
+      'test:api': (() => {
+        if (backend === 'spring-boot') return `cd ${backendDir} && ./mvnw test`;
+        if (backend === 'fastapi') return `cd ${backendDir} && pytest`;
+        if (backend === 'nest') return `npm --prefix ${backendDir} test`;
+        if (backend === 'dotnet-webapi') return `cd ${backendDir} && dotnet test`;
+        if (backend === 'rust') return `cd ${backendDir} && cargo test`;
+        return `npm --prefix ${backendDir} test`;
+      })(),
+      'test': 'npm run test:web && npm run test:api',
+    },
+    devDependencies: {
+      concurrently: '^9.0.0',
+    },
+  };
+  const rootPkgPath = path.join(rootDir, 'package.json');
+  await fs.writeFile(rootPkgPath, JSON.stringify(rootPkgJson, null, 2), 'utf-8');
+  rootFiles.push('package.json');
+
+  // 4.2 pnpm-workspace.yaml（pnpm workspace 声明）
+  if (packageManager === 'pnpm') {
+    const workspaceYaml = `packages:\n  - '${frontendDir}'\n  - '${backendDir}'\n`;
+    await fs.writeFile(path.join(rootDir, 'pnpm-workspace.yaml'), workspaceYaml, 'utf-8');
+    rootFiles.push('pnpm-workspace.yaml');
+  }
+
+  // 4.3 根 README.md
+  const rootReadme = `# ${rootPkgJson.name}
+
+> ${description}
+>
+> 由 scaffold-runner 组合栈自动生成（${compositeStack}）
+
+## 目录结构
+
+\`\`\`
+${path.basename(rootDir)}/
+├── package.json           # workspace 根（npm/pnpm workspaces）
+${packageManager === 'pnpm' ? '├── pnpm-workspace.yaml   # pnpm workspace 声明\n' : ''}├── README.md
+├── ${frontendDir}/        # 前端子工程（${frontend}）
+└── ${backendDir}/         # 后端子工程（${backend}）
+\`\`\`
+
+## 快速开始
+
+\`\`\`bash
+# 安装全部依赖（workspace 模式）
+${packageManager} install
+
+# 同时启动前后端开发
+${packageManager} run dev
+
+# 分别启动
+${packageManager} run dev:web   # 前端
+${packageManager} run dev:api   # 后端
+\`\`\`
+
+## 测试
+
+\`\`\`bash
+${packageManager} run test        # 全部测试
+${packageManager} run test:web    # 前端测试（vitest/jest）
+${packageManager} run test:api    # 后端测试（${backend === 'spring-boot' ? 'mvn test' : backend === 'fastapi' ? 'pytest' : backend === 'rust' ? 'cargo test' : 'npm test'}）
+\`\`\`
+
+## 前后端协同约定
+
+- 前端代码位于 \`${frontendDir}\`，后端代码位于 \`${backendDir}\`
+- API 契约（OpenAPI）建议放在 \`contracts/openapi.yaml\`（由 api-contract Skill 维护）
+- 同 Phase 内前后端任务可并行执行（详见 implement-executor 的 \`[frontend]\`/\`[backend]\` 标记）
+- 测试分别跑：前端 vitest/jest，后端 mvn test/pytest/go test
+`;
+  await fs.writeFile(path.join(rootDir, 'README.md'), rootReadme, 'utf-8');
+  rootFiles.push('README.md');
+
+  // 4.4 可选 git 初始化
+  if (options.git) {
+    try {
+      await execAsync('git init', { cwd: rootDir });
+      rootFiles.push('.git/');
+    } catch (e) {
+      warnings.push(`Git 初始化失败：${e.message?.slice(0, 100)}`);
+    }
+  }
+
+  const failed = subResults.filter(r => !r.ok);
+  const allOk = failed.length === 0;
+
+  const nextActions = [];
+  if (projectName !== '.') nextActions.push(`cd ${projectName}`);
+  if (!options.installDeps) nextActions.push(`${packageManager} install`);
+  nextActions.push(`${packageManager} run dev`);
+  nextActions.push(`${packageManager} run test`);
+
+  return makeResult(
+    allOk,
+    {
+      summary: `✅ 已生成组合栈 ${compositeStack}（${description}），位置：${rootDir}，共 ${totalFiles + rootFiles.length} 个文件${llmEnhanced ? ' (LLM 增强)' : ''}`,
+      outputDir: rootDir,
+      template: compositeStack,
+      stack: compositeStack,
+      mode: 'composite',
+      composite: {
+        frontend: { stack: frontend, dir: frontendDir, ok: !!feResult?.ok, outputDir: feOutputDir },
+        backend: { stack: backend, dir: backendDir, ok: !!beResult?.ok, outputDir: beOutputDir },
+      },
+      packageManager,
+      fileCount: totalFiles + rootFiles.length,
+      generatedFiles: [...rootFiles, `${frontendDir}/`, `${backendDir}/`].slice(0, 50),
+      subResults,
+      rootFiles,
+      astEnhanced: !!((feResult?.data?.astEnhanced) || (beResult?.data?.astEnhanced)),
+      llmEnhanced,
+      llmProvider: llmEnhanced ? getLlmProvider() : null,
+    },
+    allOk ? null : `部分子工程失败：${failed.map(f => `${f.side}(${f.stack})`).join(', ')}`,
+    warnings,
     llmEnhanced,
     nextActions
   );
@@ -5011,4 +5323,6 @@ module.exports = {
   _templateEngine: TemplateEngine,
   _validators: Validators,
   _templates: TEMPLATES,
+  _compositeTemplates: COMPOSITE_TEMPLATES,
+  runComposite,
 };
