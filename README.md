@@ -270,7 +270,7 @@ project-orchestrator-bundle/
         └── lib/                           # 构建后的共享库
 ```
 
-> **注意**：`dist/skills/` 为历史残留（postbuild.js 不再拷贝 skills/ 到 dist，skill-cli.cjs 直引 `examples/skills/`），修改 Skill 实现请改 `examples/skills/`。
+> **注意**：修改 Skill 实现请直接改 `examples/skills/`（`skill-cli.cjs` 直引该目录，`postbuild.js` 不再拷贝 skills/ 到 dist）。
 
 ## 构建与开发
 
@@ -746,7 +746,6 @@ Bundle **不依赖 SpecKit 或 OpenSpec CLI 工具**。它借鉴了这两个工�
 | 优先级 | 待办 | 说明 |
 |---|---|---|
 | — | Phase 2/3 实战验证 | S14-S19 检测逻辑未跑过真实项目数据 |
-| — | dist/skills/ 残留清理 | postbuild 不再拷贝，可删 dist/skills/ 目录 |
 | — | refineLogic LLM 真实环境实测 | 当前回退启发式，未在真实 LLM Provider 下验证 |
 | — | 真实 macOS / Linux 手动验证 | CI 之外的多平台端到端测试 |
 | — | Marketplace 上架 | 文档、示例、视频教程 |

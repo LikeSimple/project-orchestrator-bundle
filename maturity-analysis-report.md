@@ -28,7 +28,7 @@
 | 3 | 工具链覆盖 | 98% | 32 MCP Tools + 15 Skills + 5 CLI 直跑脚本 / CLI 绕过 MCP Server 不可用问题 / **32 工具已动态验证可见（NDJSON 握手 + tools/list）** | dist 产物在 MCP Host 重启后的实际加载仍需人工确认（脚本已验证协议层） |
 | 4 | 文档完整性 | 95% | spec/plan/checklist/tasks/design(8 文件)/logic(2 文件)/prototype 全链齐全 / **openapi 派生关系明确(S09 草案→S11 正式)** / **SKILL.md §8.5 新增 Skill 注册流程文档** | contracts/ 与 docs/design/ 的 feature 级组织（contracts/<feature>/openapi.yaml）尚未在示例落地 |
 | 5 | 测试覆盖 | 95% | smoke-p2 PASS / **phase1 26/26 + phase2 25/25 + phase3 36/36 + e2e-pipeline 18/18 全通过（共 105 测试 0 失败）** / esm-import 7 个测试文件 | phase1-3 + e2e 已全量验证通过；mocha 套件与 node --test 行为差异未对比 |
-| 6 | 代码质量 | 92% | ESM 兼容（异步 import） / UTF-8 统一（187 文件 0 TSD） / id 体系 S01-S19 一致 / **9 个历史 fix-*.cjs 脚本已清理** | dist/skills/ 目录为历史残留（postbuild 不再拷贝，skill-cli 直引 examples/），可考虑清理 |
+| 6 | 代码质量 | 92% | ESM 兼容（异步 import） / UTF-8 统一（187 文件 0 TSD） / id 体系 S01-S19 一致 / **9 个历史 fix-*.cjs 脚本已清理** / **dist/skills 历史残留已清理** | — |
 | 7 | 可维护性 | 90% | 动态分母（CLI 自动算 requiredTotal） / 文档同步（specs+README 163 处 id 替换） / migrate 脚本可复现 / **fix-*.cjs 噪声清理 + Skill 注册流程文档化降低上手成本** | state.json 依赖 recompute 重填（id 变更需手动跑一次） |
 | 8 | 扩展性 | 95% | optional 步骤设计（S10/S12/S17/S19） / complexity 信号驱动（4 维） / refineLogic 交互式细化 + **LLM 增强路径** / **新 Skill 注册三件套流程文档化** | refineLogic LLM 增强路径未在真实 LLM 环境实测（当前回退启发式） |
 | 9 | 用户体验 | 89% | CLI 输出清晰（编排状态/健康度/nextActions 引导） / nextActions 可执行建议 / **.trae/mcp.json BOM 问题已修复（UTF-8 无 BOM）** | MCP Server 重启依赖未自动化（配置变更后需手动重启 Host） |
