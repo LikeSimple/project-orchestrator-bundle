@@ -30,6 +30,11 @@ const testRunner = loadSkill('test-runner');
 const gitWorkflow = loadSkill('git-workflow');
 const reviewChecklist = loadSkill('review-checklist');
 
+// 前后端协同链路 Skill（v9 修复：打通 prototype→design→openapi→组件）
+const uiDesign = loadSkill('ui-design');
+const apiContract = loadSkill('api-contract');
+const htmlConverter = loadSkill('html-converter');
+
 // 工具函数
 async function withTempProject(fn) {
   const dir = path.join(os.tmpdir(), `po-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -146,26 +151,165 @@ describe('E2E Pipeline: spec → scaffold → design → implement → test → 
     });
   });
 
-  test('Step 6: spec-userstory-to-design.generate — 从 spec 生成设计文档', async () => {
+  test('Step 5b: scaffold-runner.run — 前后端组合栈（react-vite+spring-boot，monorepo）', async () => {
+    await withTempProject(async (projectRoot) => {
+      const result = await scaffoldRunner.run({
+        stack: 'react-vite+spring-boot',
+        name: 'mono-demo',
+        projectRoot,
+        options: { installDeps: false },
+      });
+
+      assertStdResult(result);
+      assert.strictEqual(result.data.mode, 'composite', 'should be composite mode');
+      assert.strictEqual(result.data.stack, 'react-vite+spring-boot', 'should record composite stack');
+      assert.ok(result.data.composite, 'should have composite summary');
+      assert.strictEqual(result.data.composite.frontend.stack, 'react-vite');
+      assert.strictEqual(result.data.composite.backend.stack, 'spring-boot');
+      assert.ok(result.data.rootFiles.includes('package.json'), 'root package.json should exist');
+
+      // 验证 monorepo 根文件
+      const rootPkgPath = path.join(result.data.outputDir, 'package.json');
+      assert.ok(existsSync(rootPkgPath), 'root package.json file should exist');
+      const rootPkg = JSON.parse(await fs.readFile(rootPkgPath, 'utf-8'));
+      assert.ok(Array.isArray(rootPkg.workspaces), 'root package.json should declare workspaces');
+      assert.ok(rootPkg.workspaces.includes('apps/web'), 'workspaces should include apps/web');
+      assert.ok(rootPkg.workspaces.includes('apps/api'), 'workspaces should include apps/api');
+      assert.ok(rootPkg.scripts['dev:web'], 'should have dev:web script');
+      assert.ok(rootPkg.scripts['dev:api'], 'should have dev:api script');
+      assert.ok(rootPkg.scripts['test:web'], 'should have test:web script');
+      assert.ok(rootPkg.scripts['test:api'], 'should have test:api script');
+
+      // 验证 pnpm-workspace.yaml
+      const workspacePath = path.join(result.data.outputDir, 'pnpm-workspace.yaml');
+      assert.ok(existsSync(workspacePath), 'pnpm-workspace.yaml should exist');
+
+      // 验证前后端子目录都创建了（注意：内置模板会立即产出文件，官方脚手架仅创建目录）
+      const webDir = path.join(result.data.outputDir, 'apps/web');
+      const apiDir = path.join(result.data.outputDir, 'apps/api');
+      assert.ok(existsSync(webDir), 'apps/web should exist');
+      assert.ok(existsSync(apiDir), 'apps/api should exist');
+    });
+  });
+
+  test('Step 5c: scaffold-runner.run — 未预设的组合栈也能工作（react-vite+express-api）', async () => {
+    await withTempProject(async (projectRoot) => {
+      const result = await scaffoldRunner.run({
+        stack: 'react-vite+express-api',
+        name: 'mono-flex',
+        projectRoot,
+        options: { installDeps: false },
+      });
+
+      assertStdResult(result);
+      assert.strictEqual(result.data.mode, 'composite');
+      assert.strictEqual(result.data.composite.frontend.stack, 'react-vite');
+      assert.strictEqual(result.data.composite.backend.stack, 'express-api');
+      // 未预设组合应使用默认 apps/web + apps/api 目录
+      assert.strictEqual(result.data.composite.frontend.dir, 'apps/web');
+      assert.strictEqual(result.data.composite.backend.dir, 'apps/api');
+    });
+  });
+
+  test('Step 5d: scaffold-runner.run — 无效组合栈返回 ok:false', async () => {
+    await withTempProject(async (projectRoot) => {
+      const result = await scaffoldRunner.run({
+        stack: 'react-vite+unknown-stack',
+        name: 'mono-bad',
+        projectRoot,
+        options: { installDeps: false },
+      });
+
+      assert.strictEqual(result.ok, false, 'unknown composite stack should fail');
+      assert.ok(result.error, 'should have error message');
+    });
+  });
+
+  test('Step 5.5: ui-design.generate — 生成 prototype HTML 原型', async () => {
+    await withTempProject(async (projectRoot) => {
+      const result = await uiDesign.generate({
+        featureName: 'user-auth',
+        pageCount: 2,           // 控制 LLM 调用次数，加速 CI
+        projectRoot,
+      });
+
+      assertStdResult(result);
+      assert.ok(result.data.pages.length > 0, 'should generate prototype pages');
+      assert.ok(existsSync(result.data.pages[0]), 'prototype/index.html should exist');
+      assert.ok(result.data.outputDir, 'should return prototype dir');
+    });
+  });
+
+  test('Step 6: spec-userstory-to-design.generate — 消费 spec + prototype（修复后）', async () => {
     await withTempProject(async (projectRoot) => {
       const specResult = await specBootstrap.specify({
         projectRoot,
         description: '用户登录功能，支持邮箱密码和 OAuth',
       });
 
+      // 先生成 prototype（链路前置依赖）
+      const proto = await uiDesign.generate({
+        featureName: 'user-auth',
+        pageCount: 2,
+        projectRoot,
+      });
+
       const result = await designGen.generate({
         projectRoot,
         featureName: 'user-auth',
-        specFile: specResult.data.path,  // 数据流：specify → design
+        specFile: specResult.data.path,
+        prototypeFile: proto.data.pages[0],  // ★ 修复后：传入 prototype
         format: 'all',
       });
 
       assertStdResult(result);
       assert.ok(result.data.pagesCount >= 0, 'should report pages count');
+      assert.strictEqual(result.data.prototypeUsed, true, 'should mark prototype consumed');
+      // 验证 openapi.yaml 产出（下游 api-contract 的输入）
       assert.ok(
-        typeof result.data.astEnhanced === 'boolean' || result.data.astEnhanced === undefined,
-        'design generate should have astEnhanced field'
+        result.data.files.some(f => f.endsWith('openapi.yaml')),
+        'should produce openapi.yaml for downstream api-contract'
       );
+    });
+  });
+
+  test('Step 6.5: api-contract.generate — 消费 design 产出的 openapi.yaml', async () => {
+    await withTempProject(async (projectRoot) => {
+      // 前置：spec → prototype → design
+      const spec = await specBootstrap.specify({ projectRoot, description: '用户登录功能' });
+      const proto = await uiDesign.generate({ featureName: 'user-auth', pageCount: 2, projectRoot });
+      const design = await designGen.generate({
+        projectRoot, featureName: 'user-auth',
+        specFile: spec.data.path, prototypeFile: proto.data.pages[0], format: 'all',
+      });
+      const designOpenApi = design.data.files.find(f => f.endsWith('openapi.yaml'));
+
+      const result = await apiContract.generate({
+        projectRoot,
+        fromFiles: [designOpenApi],  // ★ 数据流：design.openapi.yaml → api-contract
+        outputPath: 'contracts/openapi.yaml',
+        useLLM: false,               // CI 容错：禁用 LLM 走模板
+      });
+
+      assert.ok(typeof result === 'object', 'api-contract should return object');
+      assert.ok('ok' in result, 'should have ok field');
+    });
+  });
+
+  test('Step 6.6: html-converter.convert — 消费 prototype 生成组件', async () => {
+    await withTempProject(async (projectRoot) => {
+      const proto = await uiDesign.generate({ featureName: 'user-auth', pageCount: 2, projectRoot });
+
+      const result = await htmlConverter.convert({
+        htmlFile: proto.data.pages[0],  // ★ 数据流：prototype/index.html → 组件
+        framework: 'react',
+        typescript: true,
+        outputDir: 'src/components',
+        projectRoot,
+      });
+
+      assert.ok(typeof result === 'object', 'html-converter should return object');
+      assert.ok('ok' in result, 'should have ok field');
     });
   });
 
@@ -302,15 +446,46 @@ describe('E2E Pipeline: spec → scaffold → design → implement → test → 
       assert.ok(scaffold.data.fileCount > 0, 'should generate files');
       steps.push({ step: 'scaffold', ok: scaffold.ok, output: scaffold.data.outputDir });
 
-      // --- Step 6: design (consumes spec.data.path) ---
+      // --- Step 5.5: ui-design → prototype（前后端协同链路） ---
+      const proto = await uiDesign.generate({
+        featureName: 'calculator', pageCount: 2, projectRoot,
+      });
+      assert.strictEqual(proto.ok, true, 'ui-design should succeed');
+      assert.ok(existsSync(proto.data.pages[0]), 'prototype should exist');
+      steps.push({ step: 'ui-design', ok: proto.ok, output: proto.data.pages[0] });
+
+      // --- Step 6: design (consumes spec.path + prototype) ---
       const design = await designGen.generate({
         projectRoot,
         featureName: 'calculator',
         specFile: spec.data.path,
+        prototypeFile: proto.data.pages[0],  // ★ 修复后：传入 prototype
         format: 'all',
       });
       assert.strictEqual(design.ok, true, 'design generate should succeed');
-      steps.push({ step: 'design', ok: design.ok, input: 'spec.path' });
+      steps.push({ step: 'design', ok: design.ok, input: 'spec.path + prototype' });
+
+      // --- Step 6.5: api-contract (consumes design openapi.yaml) ---
+      const designOpenApi = design.data.files.find(f => f.endsWith('openapi.yaml'));
+      const contract = await apiContract.generate({
+        projectRoot,
+        fromFiles: [designOpenApi],
+        outputPath: 'contracts/openapi.yaml',
+        useLLM: false,               // CI 容错
+      });
+      assert.ok(typeof contract === 'object', 'api-contract should return object');
+      steps.push({ step: 'api-contract', ok: contract.ok !== false, input: 'design.openapi.yaml' });
+
+      // --- Step 6.6: html-converter (consumes prototype) ---
+      const components = await htmlConverter.convert({
+        htmlFile: proto.data.pages[0],
+        framework: 'react',
+        typescript: true,
+        outputDir: 'src/components',
+        projectRoot,
+      });
+      assert.ok(typeof components === 'object', 'html-converter should return object');
+      steps.push({ step: 'html-converter', ok: components.ok !== false, input: 'prototype' });
 
       // --- Step 7: implement (dryRun) ---
       // 注意：scaffolded 项目没有 tasks.md，runPhases 会返回 ok:false，但应返回有效结构
