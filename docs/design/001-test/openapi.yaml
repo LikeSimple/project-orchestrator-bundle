@@ -1,0 +1,245 @@
+openapi: 3.1.2
+info:
+  title: P2-修复-编排推进 API
+  version: 0.1.0-draft
+  description: |
+    自动生成（来自 spec-userstory-to-design）
+    基于 1 个 User Story 和 2 个页面推导
+
+    定位（S09 草案）:
+      - 本文件是编排状态机 S09 步骤（spec-userstory-to-design.generate）的设计期草案产物
+      - 作为 S11 步骤（api-contract.generate）的输入，经 --merge 后派生出正式契约 contracts/openapi.yaml
+      - version 含 -draft 后缀标识草案态；正式契约由 api-contract 生成后去除 -draft
+      - 消费链：spec.md + prototype/index.html → 本草案 → contracts/openapi.yaml（正式）→ implement-executor
+  contact:
+    name: P2-修复-编排推进 Team
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: 本地开发环境
+  - url: https://staging.example.com/api/v1
+    description: 测试环境
+
+tags:
+  - name: P2-修复-编排推进
+    description: P2-修复-编排推进相关接口
+
+security:
+  - BearerAuth: []
+
+paths:
+  /p2:
+    get:
+      operationId: listP2s
+      summary: 列表查询P2
+      tags: [P2-修复-编排推进]
+      x-page-id: P-001TEST-01
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/P2' }
+                  total: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createP2
+      summary: 创建P2
+      tags: [P2-修复-编排推进]
+      x-page-id: 
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/P2Create' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/P2' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /p2/{id}:
+    get:
+      operationId: getP2
+      summary: 获取P2详情
+      tags: [P2-修复-编排推进]
+      x-page-id: P-001TEST-02
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/P2' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateP2
+      summary: 更新P2
+      tags: [P2-修复-编排推进]
+      x-page-id: 
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/P2Update' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/P2' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      operationId: deleteP2
+      summary: 删除P2
+      tags: [P2-修复-编排推进]
+      x-page-id: 
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: 问题类型标识
+        title:
+          type: string
+          description: 简短描述
+        status:
+          type: integer
+          description: HTTP 状态码
+        detail:
+          type: string
+          description: 详细描述
+        traceId:
+          type: string
+          description: 请求追踪 ID
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+    P2:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 唯一标识
+        name:
+          type: string
+          maxLength: 100
+          description: 名称
+        status:
+          type: string
+          enum: [active, inactive, archived]
+          default: active
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+    P2Create:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        status:
+          type: string
+          enum: [active, inactive]
+          default: active
+    P2Update:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        status:
+          type: string
+          enum: [active, inactive, archived]
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: 未授权
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: 无权限
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: 实体无法处理（校验失败）
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalServerError:
+      description: 服务器内部错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

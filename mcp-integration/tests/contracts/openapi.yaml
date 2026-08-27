@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: |
     由 project-orchestrator-bundle / api-contract 自动生成
-    生成时间: 2026-08-25 10:46:43
+    生成时间: 2026-08-27 05:49:29
     来源文件: 无
     提取方式: 正则启发式
   x-generated-by: project-orchestrator-bundle/api-contract@1.0

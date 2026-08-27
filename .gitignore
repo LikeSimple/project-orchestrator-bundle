@@ -33,3 +33,10 @@ npm-debug.log*
 tmp/
 temp/
 *.tmp
+
+# Orchestrator runtime state & health data
+.orchestrator-sm/
+.orchestrator-health/
+.debug-history.json
+**/.debug-history.json
+

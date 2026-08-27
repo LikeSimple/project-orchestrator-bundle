@@ -5,7 +5,14 @@ info:
   description: |
     由 project-orchestrator-bundle / api-contract 自动生成
     生成时间: 2026-08-24 16:17:57
-    来源文件: 
+    来源文件:
+
+    定位（S11 正式契约）:
+      - 本文件是编排状态机 S11 步骤（api-contract.generate）的正式产物
+      - 派生自 S09 草案 docs/design/<feature>/openapi.yaml（由 spec-userstory-to-design.generate 生成）
+      - 可由 plan.md 或 docs/design/ 目录作为输入，通过 --merge 合并 page detail 的 operationId
+      - 本文件为 example feature 的示例契约；实际 feature 的契约按 feature 名组织在 contracts/<feature>/openapi.yaml
+      - 与 S09 草案的关系：草案是设计期产物（version 含 -draft），本文件是契约期产物（正式 version），下游 implement/test-runner 消费本文件
   x-generated-by: project-orchestrator-bundle/api-contract@1.0
 
 servers:

@@ -1,0 +1,20 @@
+---
+title: P2-修复-编排推进 Page Flow
+---
+flowchart TD
+    START(["用户访问"]) -->|入口| P-001TEST-01["P2-修复-编排推进列表页"]
+    P-001TEST-01[/"P2-修复-编排推进列表页<br/><small>/p2/list</small>"\]
+    P-001TEST-02["P2-修复-编排推进详情页<br/><small>/p2/detail/:id</small>"]
+    START --> |用户访问| P-001TEST-01
+    P-001TEST-01 --> |点击列表项| P-001TEST-02
+    P-001TEST-02 --> |返回| P-001TEST-01
+
+    classDef page fill:#e8f4fd,stroke:#3b82f6,stroke-width:2px,color:#1e40af
+    classDef list fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#166534
+    classDef detail fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
+    classDef action fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#6b21a8
+    classDef decision fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    classDef entry fill:#e0e7ff,stroke:#6366f1,stroke-width:2px
+    class P-001TEST-01 list
+    class P-001TEST-02 detail
+    class START entry

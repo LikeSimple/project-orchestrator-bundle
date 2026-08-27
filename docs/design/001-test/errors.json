@@ -1,0 +1,50 @@
+{
+  "generatedAt": "2026-08-27T03:20:29.531Z",
+  "totalCount": 6,
+  "categories": [
+    "system",
+    "permission",
+    "rate-limit",
+    "not-found",
+    "validation",
+    "concurrency"
+  ],
+  "errors": [
+    {
+      "code": "E1001",
+      "httpStatus": 500,
+      "message": "加载失败，请稍后重试",
+      "category": "system"
+    },
+    {
+      "code": "E1002",
+      "httpStatus": 403,
+      "message": "无权限执行此操作",
+      "category": "permission"
+    },
+    {
+      "code": "E1003",
+      "httpStatus": 429,
+      "message": "操作过于频繁，请稍后再试",
+      "category": "rate-limit"
+    },
+    {
+      "code": "E1004",
+      "httpStatus": 404,
+      "message": "数据不存在或已删除",
+      "category": "not-found"
+    },
+    {
+      "code": "E1005",
+      "httpStatus": 400,
+      "message": "提交失败，请检查输入",
+      "category": "validation"
+    },
+    {
+      "code": "E1006",
+      "httpStatus": 409,
+      "message": "数据已被修改，请刷新",
+      "category": "concurrency"
+    }
+  ]
+}
